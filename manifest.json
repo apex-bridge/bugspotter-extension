@@ -3,14 +3,8 @@
   "name": "BugSpotter",
   "version": "1.0.0",
   "description": "Capture bug reports and submit them to BugSpotter",
-  "permissions": [
-    "activeTab",
-    "storage",
-    "tabs"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "permissions": ["activeTab", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_icon": {

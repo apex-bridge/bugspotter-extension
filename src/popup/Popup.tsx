@@ -34,7 +34,10 @@ export function Popup() {
     // Send to content script for annotation
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, { type: 'START_ANNOTATION', screenshot: response.data });
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'START_ANNOTATION',
+        screenshot: response.data,
+      });
       // Close popup while annotating
       window.close();
     }
@@ -109,7 +112,9 @@ export function Popup() {
     return (
       <div className="w-80 p-4 bg-gray-900 text-white">
         <h1 className="text-lg font-bold mb-2">BugSpotter</h1>
-        <p className="text-sm text-gray-400 mb-3">Please configure your BugSpotter URL and API key in the extension options.</p>
+        <p className="text-sm text-gray-400 mb-3">
+          Please configure your BugSpotter URL and API key in the extension options.
+        </p>
         <button
           onClick={() => chrome.runtime.openOptionsPage()}
           className="w-full py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium"
@@ -126,7 +131,12 @@ export function Popup() {
         <div className="text-green-400 text-2xl mb-2">&#10003;</div>
         <p className="font-medium">Bug report submitted!</p>
         <button
-          onClick={() => { setStatus('idle'); setTitle(''); setDescription(''); setScreenshot(null); }}
+          onClick={() => {
+            setStatus('idle');
+            setTitle('');
+            setDescription('');
+            setScreenshot(null);
+          }}
           className="mt-3 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
         >
           Submit Another
@@ -166,11 +176,7 @@ export function Popup() {
 
       {errorMsg && <p className="mt-2 text-red-400 text-xs">{errorMsg}</p>}
 
-      <SubmitButton
-        status={status}
-        disabled={!title.trim() || !projectId}
-        onClick={handleSubmit}
-      />
+      <SubmitButton status={status} disabled={!title.trim() || !projectId} onClick={handleSubmit} />
     </div>
   );
 }

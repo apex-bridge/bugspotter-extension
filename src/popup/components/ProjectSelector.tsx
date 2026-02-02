@@ -34,7 +34,9 @@ export function ProjectSelector({ value, onChange }: Props) {
         className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
       >
         {projects.map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
         ))}
       </select>
     </div>

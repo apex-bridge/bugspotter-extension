@@ -1,10 +1,7 @@
 import type { BugReportPayload, CreateReportResponse, Project, Settings } from '@/types';
 import { getSettings } from '@/storage/settings';
 
-async function apiRequest<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const settings = await getSettings();
   if (!settings.baseUrl || !settings.apiKey) {
     throw new Error('BugSpotter URL and API key must be configured in extension options.');

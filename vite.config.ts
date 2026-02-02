@@ -5,10 +5,7 @@ import manifest from './manifest.json';
 import path from 'path';
 
 export default defineConfig({
-  plugins: [
-    react(),
-    crx({ manifest }),
-  ],
+  plugins: [react(), crx({ manifest })],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -68,7 +68,9 @@ export function Options() {
           </div>
 
           {errorMsg && <p className="text-red-400 text-sm">{errorMsg}</p>}
-          {status === 'saved' && <p className="text-green-400 text-sm">Settings saved and validated.</p>}
+          {status === 'saved' && (
+            <p className="text-green-400 text-sm">Settings saved and validated.</p>
+          )}
 
           <button
             onClick={handleSave}

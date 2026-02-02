@@ -1,4 +1,3 @@
-
 interface Props {
   title: string;
   description: string;
@@ -10,7 +9,14 @@ interface Props {
 
 const priorities = ['low', 'medium', 'high', 'critical'] as const;
 
-export function BugReportForm({ title, description, priority, onTitleChange, onDescriptionChange, onPriorityChange }: Props) {
+export function BugReportForm({
+  title,
+  description,
+  priority,
+  onTitleChange,
+  onDescriptionChange,
+  onPriorityChange,
+}: Props) {
   return (
     <div className="space-y-3">
       <div>
@@ -42,10 +48,13 @@ export function BugReportForm({ title, description, priority, onTitleChange, onD
               onClick={() => onPriorityChange(p)}
               className={`flex-1 py-1 text-xs rounded capitalize ${
                 priority === p
-                  ? p === 'critical' ? 'bg-red-600 text-white'
-                  : p === 'high' ? 'bg-orange-600 text-white'
-                  : p === 'medium' ? 'bg-yellow-600 text-white'
-                  : 'bg-green-600 text-white'
+                  ? p === 'critical'
+                    ? 'bg-red-600 text-white'
+                    : p === 'high'
+                      ? 'bg-orange-600 text-white'
+                      : p === 'medium'
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-green-600 text-white'
                   : 'bg-gray-800 text-gray-400 border border-gray-700'
               }`}
             >

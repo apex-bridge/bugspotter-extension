@@ -127,8 +127,10 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
 
     if (action.type === 'rectangle') {
       ctx.strokeRect(
-        action.startX, action.startY,
-        action.endX - action.startX, action.endY - action.startY
+        action.startX,
+        action.startY,
+        action.endX - action.startX,
+        action.endY - action.startY,
       );
     } else if (action.type === 'arrow') {
       const dx = action.endX - action.startX;
@@ -143,9 +145,15 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
 
       ctx.beginPath();
       ctx.moveTo(action.endX, action.endY);
-      ctx.lineTo(action.endX - headLen * Math.cos(angle - Math.PI / 6), action.endY - headLen * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(
+        action.endX - headLen * Math.cos(angle - Math.PI / 6),
+        action.endY - headLen * Math.sin(angle - Math.PI / 6),
+      );
       ctx.moveTo(action.endX, action.endY);
-      ctx.lineTo(action.endX - headLen * Math.cos(angle + Math.PI / 6), action.endY - headLen * Math.sin(angle + Math.PI / 6));
+      ctx.lineTo(
+        action.endX - headLen * Math.cos(angle + Math.PI / 6),
+        action.endY - headLen * Math.sin(angle + Math.PI / 6),
+      );
       ctx.stroke();
     } else if (action.type === 'freehand' && action.points) {
       ctx.beginPath();
@@ -188,7 +196,15 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
       isDrawing = false;
       const text = prompt('Enter text:');
       if (text) {
-        const action: DrawAction = { type: 'text', color: currentColor, startX: x, startY: y, endX: x, endY: y, text };
+        const action: DrawAction = {
+          type: 'text',
+          color: currentColor,
+          startX: x,
+          startY: y,
+          endX: x,
+          endY: y,
+          text,
+        };
         undoStack.push(action);
         redoStack.length = 0;
         redrawAll();
@@ -213,7 +229,14 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
       ctx.stroke();
     } else {
       redrawAll();
-      const preview: DrawAction = { type: currentTool, color: currentColor, startX, startY, endX: x, endY: y };
+      const preview: DrawAction = {
+        type: currentTool,
+        color: currentColor,
+        startX,
+        startY,
+        endX: x,
+        endY: y,
+      };
       drawAction(preview);
     }
   });
@@ -224,7 +247,15 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
     const { x, y } = getCanvasCoords(e);
 
     if (currentTool === 'freehand') {
-      undoStack.push({ type: 'freehand', color: currentColor, startX, startY, endX: x, endY: y, points: [...currentFreehand] });
+      undoStack.push({
+        type: 'freehand',
+        color: currentColor,
+        startX,
+        startY,
+        endX: x,
+        endY: y,
+        points: [...currentFreehand],
+      });
     } else {
       undoStack.push({ type: currentTool, color: currentColor, startX, startY, endX: x, endY: y });
     }
@@ -235,7 +266,9 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
   // Toolbar handlers
   shadow.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      shadow.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((b) => b.classList.remove('active'));
+      shadow
+        .querySelectorAll<HTMLButtonElement>('[data-tool]')
+        .forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentTool = btn.dataset.tool!;
     });
@@ -243,7 +276,9 @@ function injectAnnotationOverlay(screenshotDataUrl: string) {
 
   shadow.querySelectorAll<HTMLButtonElement>('[data-color]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      shadow.querySelectorAll<HTMLButtonElement>('[data-color]').forEach((b) => b.classList.remove('active'));
+      shadow
+        .querySelectorAll<HTMLButtonElement>('[data-color]')
+        .forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       currentColor = btn.dataset.color!;
     });

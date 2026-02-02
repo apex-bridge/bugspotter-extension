@@ -29,11 +29,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'CAPTURE_SCREENSHOT') {
-    chrome.tabs.captureVisibleTab({ format: 'png' }).then((dataUrl) => {
-      sendResponse({ type: 'SCREENSHOT_CAPTURED', data: dataUrl });
-    }).catch((err) => {
-      sendResponse({ error: err.message });
-    });
+    chrome.tabs
+      .captureVisibleTab({ format: 'png' })
+      .then((dataUrl) => {
+        sendResponse({ type: 'SCREENSHOT_CAPTURED', data: dataUrl });
+      })
+      .catch((err) => {
+        sendResponse({ error: err.message });
+      });
     return true;
   }
 
@@ -45,11 +48,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'SUBMIT_REPORT') {
-    handleSubmit(message.data).then((result) => {
-      sendResponse({ success: true, data: result });
-    }).catch((err) => {
-      sendResponse({ success: false, error: err.message });
-    });
+    handleSubmit(message.data)
+      .then((result) => {
+        sendResponse({ success: true, data: result });
+      })
+      .catch((err) => {
+        sendResponse({ success: false, error: err.message });
+      });
     return true;
   }
 
