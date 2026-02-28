@@ -44,7 +44,17 @@
         return;
       }
 
-      var entry = { level: level, message: msg, timestamp: Date.now(), args: [] };
+      // Capture raw args for richer debugging. JSON round-trip each arg
+      // to avoid structured clone failures on DOM nodes, functions, etc.
+      var safeArgs = args.map(function (a) {
+        if (a === null || a === undefined || typeof a !== 'object') return a;
+        try {
+          return JSON.parse(JSON.stringify(a));
+        } catch (e) {
+          return String(a);
+        }
+      });
+      var entry = { level: level, message: msg, timestamp: Date.now(), args: safeArgs };
 
       // Capture stack trace for error/warn
       if (level === 'error' || level === 'warn') {

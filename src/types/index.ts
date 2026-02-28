@@ -15,7 +15,6 @@ export interface NetworkEntry {
   timestamp: number;
   headers: Record<string, string>;
   requestBody?: string;
-  responseBody?: string;
   error?: string;
 }
 

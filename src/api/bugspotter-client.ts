@@ -93,9 +93,21 @@ export async function confirmUpload(
 }
 
 export async function validateConnection(settings: Settings): Promise<boolean> {
+  if (!settings.baseUrl || !settings.apiKey) return false;
+
+  const baseUrl = settings.baseUrl.replace(/\/$/, '');
+  const url = `${baseUrl}/api/v1/projects`;
+
+  if (!isSecureEndpoint(url)) return false;
+
   try {
-    const healthUrl = `${settings.baseUrl.replace(/\/$/, '')}/health`;
-    const response = await fetch(healthUrl);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': settings.apiKey,
+      },
+    });
     return response.ok;
   } catch {
     return false;

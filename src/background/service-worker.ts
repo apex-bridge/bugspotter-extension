@@ -8,7 +8,7 @@ import {
 import { BugReportDeduplicator } from '@bugspotter/common';
 import { OfflineQueue } from '@/utils/offline-queue';
 import { getSettings } from '@/storage/settings';
-import { gzipCompress, compressImage } from '@/utils/compress';
+import { gzipCompress } from '@/utils/compress';
 
 const deduplicator = new BugReportDeduplicator();
 const offlineQueue = new OfflineQueue({ enabled: true, maxQueueSize: 10 });
@@ -78,10 +78,11 @@ async function handleSubmit(
     // Step 1: Create report (retry is handled inside the API client)
     const result = await createReport(payload);
 
-    // Step 2: Upload screenshot if present (compress first)
+    // Step 2: Upload screenshot if present
+    // Note: compressImage requires DOM APIs (canvas, Image) unavailable in MV3
+    // service workers. Screenshot is uploaded as the original PNG from captureVisibleTab.
     if (screenshotDataUrl && result.data.presignedUrls?.screenshot) {
-      const optimized = await compressImage(screenshotDataUrl);
-      const blob = await dataUrlToBlob(optimized);
+      const blob = await dataUrlToBlob(screenshotDataUrl);
       await uploadScreenshot(result.data.presignedUrls.screenshot.uploadUrl, blob);
       await confirmUpload(result.data.id, 'screenshot');
     }
@@ -99,12 +100,15 @@ async function handleSubmit(
   } catch (err) {
     deduplicator.markComplete(payload.title, payload.description);
 
-    // Queue for offline retry on network errors
+    // Queue for offline retry on network errors.
+    // We don't persist screenshot/replay data in the queue, so clear those
+    // flags to prevent the server from expecting uploads that won't arrive.
     if (isNetworkError(err)) {
       const settings = await getSettings();
+      const offlinePayload = { ...payload, hasScreenshot: false, hasReplay: false };
       await offlineQueue.enqueue(
         `${settings.baseUrl.replace(/\/$/, '')}/api/v1/reports`,
-        JSON.stringify(payload),
+        JSON.stringify(offlinePayload),
         { 'Content-Type': 'application/json', 'X-API-Key': settings.apiKey },
       );
     }
@@ -129,7 +133,7 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return response.blob();
 }
 
-// Process offline queue on startup and when coming back online
+// Process offline queue on service worker startup
 async function processOfflineQueue() {
   const settings = await getSettings();
   if (!settings.baseUrl || !settings.apiKey) return;
@@ -139,11 +143,6 @@ async function processOfflineQueue() {
 
 // Process queue on service worker activation
 processOfflineQueue().catch(() => {});
-
-// Clean up on tab close
-chrome.tabs.onRemoved.addListener(() => {
-  pendingAnnotatedScreenshot = null;
-});
 
 // Set badge
 chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
