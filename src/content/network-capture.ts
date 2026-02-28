@@ -10,7 +10,7 @@ import type { Sanitizer } from '@bugspotter/common';
 
 declare global {
   interface XMLHttpRequest {
-    _bugspotter?: { method: string; url: string; start: number };
+    _bugspotter?: { method: string; url: string; start: number; errored?: boolean };
   }
 }
 
@@ -32,7 +32,7 @@ function sanitizeEntry(entry: NetworkEntry): NetworkEntry {
 function addEntry(raw: NetworkEntry) {
   const entry = sanitizeEntry(raw);
 
-  // If filter set, skip matching URLs unless they errored
+  // If filter set, only capture matching URLs (allowlist) unless they errored
   if (filterUrl) {
     const shouldCapture = filterUrl(entry.url);
     const isError = entry.status < 200 || entry.status >= 300;
@@ -107,7 +107,7 @@ function interceptFetch() {
         timestamp: start,
         headers: {},
         requestBody,
-        error: (error as Error).message,
+        error: error instanceof Error ? error.message : String(error),
       });
       throw error;
     }
@@ -140,23 +140,9 @@ function interceptXHR() {
       }
     }
 
-    this.addEventListener('loadend', () => {
-      if (this._bugspotter) {
-        addEntry({
-          url: this._bugspotter.url,
-          method: this._bugspotter.method,
-          status: this.status,
-          statusText: this.statusText,
-          duration: Date.now() - this._bugspotter.start,
-          timestamp: this._bugspotter.start,
-          headers: {},
-          requestBody,
-        });
-      }
-    });
-
     this.addEventListener('error', () => {
       if (this._bugspotter) {
+        this._bugspotter.errored = true;
         addEntry({
           url: this._bugspotter.url,
           method: this._bugspotter.method,
@@ -167,6 +153,21 @@ function interceptXHR() {
           headers: {},
           requestBody,
           error: 'XMLHttpRequest failed',
+        });
+      }
+    });
+
+    this.addEventListener('loadend', () => {
+      if (this._bugspotter && !this._bugspotter.errored) {
+        addEntry({
+          url: this._bugspotter.url,
+          method: this._bugspotter.method,
+          status: this.status,
+          statusText: this.statusText,
+          duration: Date.now() - this._bugspotter.start,
+          timestamp: this._bugspotter.start,
+          headers: {},
+          requestBody,
         });
       }
     });

@@ -53,7 +53,7 @@ export function Popup() {
     chrome.runtime
       .sendMessage({ type: 'GET_OFFLINE_QUEUE_SIZE' })
       .then((res) => {
-        if (res?.size) setOfflineCount(res.size);
+        if (typeof res?.size === 'number') setOfflineCount(res.size);
       })
       .catch(() => {});
   }, []);

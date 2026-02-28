@@ -139,25 +139,8 @@
     var xhr = this;
     xhr._bs_body = body ? String(body).slice(0, 2048) : '';
 
-    xhr.addEventListener('loadend', function () {
-      var entry = {
-        url: xhr._bs_url || '',
-        method: xhr._bs_method || 'GET',
-        status: xhr.status,
-        statusText: xhr.statusText || '',
-        duration: Date.now() - (xhr._bs_start || Date.now()),
-        timestamp: xhr._bs_start || Date.now(),
-        headers: {},
-        requestBody: xhr._bs_body || '',
-      };
-      try {
-        window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');
-      } catch (e) {
-        /* ignore */
-      }
-    });
-
     xhr.addEventListener('error', function () {
+      xhr._bs_errored = true;
       var entry = {
         url: xhr._bs_url || '',
         method: xhr._bs_method || 'GET',
@@ -168,6 +151,25 @@
         headers: {},
         requestBody: xhr._bs_body || '',
         error: 'XHR error',
+      };
+      try {
+        window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');
+      } catch (e) {
+        /* ignore */
+      }
+    });
+
+    xhr.addEventListener('loadend', function () {
+      if (xhr._bs_errored) return; // Already reported by the error handler
+      var entry = {
+        url: xhr._bs_url || '',
+        method: xhr._bs_method || 'GET',
+        status: xhr.status,
+        statusText: xhr.statusText || '',
+        duration: Date.now() - (xhr._bs_start || Date.now()),
+        timestamp: xhr._bs_start || Date.now(),
+        headers: {},
+        requestBody: xhr._bs_body || '',
       };
       try {
         window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');

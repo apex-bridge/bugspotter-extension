@@ -9,12 +9,12 @@ import { BugReportDeduplicator } from '@bugspotter/common';
 import { OfflineQueue } from '@/utils/offline-queue';
 import { getSettings } from '@/storage/settings';
 import { gzipCompress } from '@/utils/compress';
+import { isSecureEndpoint } from '@bugspotter/common';
+
+const PENDING_SCREENSHOT_KEY = 'bugspotter_pending_screenshot';
 
 const deduplicator = new BugReportDeduplicator();
 const offlineQueue = new OfflineQueue({ enabled: true, maxQueueSize: 10 });
-
-// Store annotated screenshot so it survives popup close/reopen
-let pendingAnnotatedScreenshot: string | null = null;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'CAPTURE_SCREENSHOT') {
@@ -29,18 +29,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  // Store annotated screenshot so it persists after popup closes during annotation
+  // Store annotated screenshot in session storage so it survives service worker restarts
   if (message.type === 'ANNOTATION_DONE' && message.data) {
-    pendingAnnotatedScreenshot = message.data as string;
+    chrome.storage.session.set({ [PENDING_SCREENSHOT_KEY]: message.data }).catch(() => {});
     return false;
   }
 
   // Popup asks if there's a pending annotated screenshot (after reopening)
   if (message.type === 'GET_PENDING_SCREENSHOT') {
-    const data = pendingAnnotatedScreenshot;
-    pendingAnnotatedScreenshot = null;
-    sendResponse({ data });
-    return false;
+    chrome.storage.session
+      .get(PENDING_SCREENSHOT_KEY)
+      .then((result) => {
+        const data = result[PENDING_SCREENSHOT_KEY] ?? null;
+        if (data) chrome.storage.session.remove(PENDING_SCREENSHOT_KEY).catch(() => {});
+        sendResponse({ data });
+      })
+      .catch(() => {
+        sendResponse({ data: null });
+      });
+    return true;
   }
 
   if (message.type === 'GET_OFFLINE_QUEUE_SIZE') {
@@ -105,12 +112,18 @@ async function handleSubmit(
     // flags to prevent the server from expecting uploads that won't arrive.
     if (isNetworkError(err)) {
       const settings = await getSettings();
-      const offlinePayload = { ...payload, hasScreenshot: false, hasReplay: false };
-      await offlineQueue.enqueue(
-        `${settings.baseUrl.replace(/\/$/, '')}/api/v1/reports`,
-        JSON.stringify(offlinePayload),
-        { 'Content-Type': 'application/json', 'X-API-Key': settings.apiKey },
-      );
+      const baseUrl = settings.baseUrl?.trim();
+      const apiKey = settings.apiKey?.trim();
+      if (baseUrl && apiKey) {
+        const endpoint = `${baseUrl.replace(/\/$/, '')}/api/v1/reports`;
+        if (isSecureEndpoint(endpoint)) {
+          const offlinePayload = { ...payload, hasScreenshot: false, hasReplay: false };
+          await offlineQueue.enqueue(endpoint, JSON.stringify(offlinePayload), {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+          });
+        }
+      }
     }
 
     throw err;

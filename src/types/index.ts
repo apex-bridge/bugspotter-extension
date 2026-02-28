@@ -99,8 +99,13 @@ export type MessageType =
   | { type: 'START_ANNOTATION'; screenshot: string }
   | { type: 'ANNOTATION_DONE'; data: string }
   | { type: 'ANNOTATION_CANCEL' }
-  | { type: 'SUBMIT_REPORT'; data: BugReportPayload & { screenshotDataUrl: string } }
+  | {
+      type: 'SUBMIT_REPORT';
+      data: BugReportPayload & { screenshotDataUrl: string; replayEvents: unknown[] };
+    }
   | { type: 'GET_REPLAY_EVENTS' }
   | { type: 'REPLAY_EVENTS'; data: unknown[] }
   | { type: 'START_REPLAY' }
-  | { type: 'STOP_REPLAY' };
+  | { type: 'STOP_REPLAY' }
+  | { type: 'GET_PENDING_SCREENSHOT' }
+  | { type: 'GET_OFFLINE_QUEUE_SIZE' };

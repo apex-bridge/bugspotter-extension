@@ -44,7 +44,8 @@ export async function fetchProjects(): Promise<Project[]> {
   try {
     const result = await apiRequest<{ success: boolean; data: Project[] }>('/api/v1/projects');
     return result.data;
-  } catch {
+  } catch (err) {
+    console.warn('[BugSpotter] fetchProjects failed, using fallback:', err);
     return [{ id: 'api-key-project', name: 'API Key Project' }];
   }
 }

@@ -73,6 +73,10 @@ async function saveQueue(queue: QueuedRequest[]): Promise<void> {
         // Still failing — clear everything
         await chrome.storage.local.remove(QUEUE_KEY);
       }
+    } else {
+      // Non-quota error: log so callers are aware persistence failed
+      console.error('[BugSpotter] Failed to persist offline queue:', error);
+      throw error;
     }
   }
 }

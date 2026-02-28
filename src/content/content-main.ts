@@ -32,7 +32,7 @@ function isDomainAllowed(allowedDomains: string[]): boolean {
       const base = d.slice(2);
       return hostname === base || hostname.endsWith('.' + base);
     }
-    return hostname === d || hostname.endsWith('.' + d);
+    return hostname === d;
   });
 }
 
@@ -48,6 +48,54 @@ function injectMainWorldCaptures() {
   (document.documentElement || document.head || document.body).appendChild(script);
 }
 
+// Caps for string fields coming from postMessage to prevent oversized entries
+const MAX_MESSAGE_LENGTH = 4000;
+const MAX_URL_LENGTH = 2000;
+const MAX_BODY_LENGTH = 4000;
+const MAX_STACK_LENGTH = 4000;
+
+function truncStr(val: unknown, max: number): string {
+  if (typeof val !== 'string') return '';
+  return val.length > max ? val.slice(0, max) : val;
+}
+
+function validateConsoleEntry(data: unknown): ConsoleEntry | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.level !== 'string' || typeof d.timestamp !== 'number') return null;
+  const validLevels = ['log', 'info', 'warn', 'error', 'debug'];
+  if (!validLevels.includes(d.level)) return null;
+  return {
+    level: d.level as ConsoleEntry['level'],
+    message: truncStr(d.message, MAX_MESSAGE_LENGTH),
+    timestamp: d.timestamp,
+    args: Array.isArray(d.args) ? d.args.slice(0, 20) : [],
+    ...(typeof d.stack === 'string' ? { stack: truncStr(d.stack, MAX_STACK_LENGTH) } : {}),
+  };
+}
+
+function validateNetworkEntry(data: unknown): NetworkEntry | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.url !== 'string' || typeof d.timestamp !== 'number') return null;
+  return {
+    url: truncStr(d.url, MAX_URL_LENGTH),
+    method: typeof d.method === 'string' ? d.method.slice(0, 10) : 'GET',
+    status: typeof d.status === 'number' ? d.status : 0,
+    statusText: typeof d.statusText === 'string' ? d.statusText.slice(0, 100) : '',
+    duration: typeof d.duration === 'number' ? d.duration : 0,
+    timestamp: d.timestamp,
+    headers:
+      typeof d.headers === 'object' && d.headers !== null
+        ? (d.headers as Record<string, string>)
+        : {},
+    ...(typeof d.requestBody === 'string'
+      ? { requestBody: truncStr(d.requestBody, MAX_BODY_LENGTH) }
+      : {}),
+    ...(typeof d.error === 'string' ? { error: d.error.slice(0, 500) } : {}),
+  };
+}
+
 /** Listen for postMessage from the injected main-world script */
 function listenForMainWorldCaptures() {
   window.addEventListener('message', (event) => {
@@ -55,17 +103,17 @@ function listenForMainWorldCaptures() {
     const msg = event.data;
     if (!msg || msg.source !== 'bugspotter-capture') return;
 
-    if (msg.type === 'console' && msg.data) {
-      const entry = sanitizer
-        ? (sanitizer.sanitize(msg.data) as ConsoleEntry)
-        : (msg.data as ConsoleEntry);
+    if (msg.type === 'console') {
+      const validated = validateConsoleEntry(msg.data);
+      if (!validated) return;
+      const entry = sanitizer ? (sanitizer.sanitize(validated) as ConsoleEntry) : validated;
       consoleBuffer.add(entry);
     }
 
-    if (msg.type === 'network' && msg.data) {
-      const entry = sanitizer
-        ? (sanitizer.sanitize(msg.data) as NetworkEntry)
-        : (msg.data as NetworkEntry);
+    if (msg.type === 'network') {
+      const validated = validateNetworkEntry(msg.data);
+      if (!validated) return;
+      const entry = sanitizer ? (sanitizer.sanitize(validated) as NetworkEntry) : validated;
       networkBuffer.add(entry);
     }
   });
@@ -94,9 +142,9 @@ async function init() {
   networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
   initialized = true;
 
-  // Inject capture code into the page's main world
-  injectMainWorldCaptures();
+  // Listen first, then inject — ensures no early events are missed
   listenForMainWorldCaptures();
+  injectMainWorldCaptures();
 
   // Start session replay if enabled (pass sanitizer for PII masking)
   if (replayEnabled) {
@@ -113,8 +161,8 @@ init().catch((err) => {
   consoleBuffer = new CircularBuffer<ConsoleEntry>(100);
   networkBuffer = new CircularBuffer<NetworkEntry>(50);
   initialized = true;
-  injectMainWorldCaptures();
   listenForMainWorldCaptures();
+  injectMainWorldCaptures();
 });
 
 // Listen for messages from service worker / popup

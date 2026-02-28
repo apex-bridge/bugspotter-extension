@@ -11,9 +11,11 @@ import { TimeBasedBuffer, type ReplayEvent, type Sanitizer } from '@bugspotter/c
 
 let replayBuffer: TimeBasedBuffer | null = null;
 let stopFn: (() => void) | null = null;
+let pendingAbort: AbortController | null = null;
 let activeSanitizer: Sanitizer | null = null;
 
 function beginRecording(durationSeconds: number): void {
+  pendingAbort = null;
   replayBuffer = new TimeBasedBuffer(durationSeconds);
 
   stopFn =
@@ -52,22 +54,33 @@ function beginRecording(durationSeconds: number): void {
 }
 
 export function startReplayRecording(durationSeconds = 60, sanitizer?: Sanitizer): void {
-  if (stopFn) return; // already recording
+  if (stopFn || pendingAbort) return; // already recording or pending
 
   if (sanitizer) activeSanitizer = sanitizer;
 
   // rrweb needs at least document.documentElement to take a snapshot.
   // Content scripts run at document_start where body may not exist yet.
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => beginRecording(durationSeconds), {
-      once: true,
-    });
+    const abort = new AbortController();
+    pendingAbort = abort;
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        if (!abort.signal.aborted) beginRecording(durationSeconds);
+      },
+      { once: true, signal: abort.signal },
+    );
   } else {
     beginRecording(durationSeconds);
   }
 }
 
 export function stopReplayRecording(): void {
+  // Cancel pending DOMContentLoaded start if stop is called before DOM is ready
+  if (pendingAbort) {
+    pendingAbort.abort();
+    pendingAbort = null;
+  }
   if (stopFn) {
     stopFn();
     stopFn = null;
