@@ -1,4 +1,5 @@
 import { startReplayRecording, stopReplayRecording, getReplayEvents } from './replay-recorder';
+import { captureMetadata } from './metadata';
 import {
   CircularBuffer,
   createSanitizer,
@@ -169,7 +170,10 @@ init().catch((err) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // If captures weren't initialized (domain not allowed), return empty data
   if (!initialized && message.type === 'GET_CAPTURE_DATA') {
-    sendResponse({ type: 'CAPTURE_DATA', data: { console: [], network: [] } });
+    sendResponse({
+      type: 'CAPTURE_DATA',
+      data: { console: [], network: [], metadata: null },
+    });
     return true;
   }
 
@@ -179,6 +183,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       data: {
         console: getConsoleLogs(),
         network: getNetworkRequests(),
+        metadata: captureMetadata(sanitizer ?? undefined),
       },
     });
     return true;

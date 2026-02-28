@@ -6,23 +6,6 @@ import { getSettings } from '@/storage/settings';
 
 type SubmitStatus = 'idle' | 'loading' | 'success' | 'error';
 
-function detectBrowser(ua: string): string {
-  if (ua.includes('Edg')) return 'Edge';
-  if (ua.includes('Chrome') && !ua.includes('Edge')) return 'Chrome';
-  if (ua.includes('Firefox')) return 'Firefox';
-  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari';
-  return 'Unknown';
-}
-
-function detectOS(ua: string): string {
-  if (ua.includes('iPhone') || ua.includes('iPad')) return 'iOS';
-  if (ua.includes('Android')) return 'Android';
-  if (ua.includes('Win')) return 'Windows';
-  if (ua.includes('Mac')) return 'macOS';
-  if (ua.includes('Linux')) return 'Linux';
-  return 'Unknown';
-}
-
 export function Popup() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -88,9 +71,12 @@ export function Popup() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const tabId = tab?.id;
 
-      // Get capture data directly from content script (not service worker,
-      // whose in-memory store is lost when MV3 suspends it)
-      let captureData: { data?: { console?: unknown[]; network?: unknown[] } } = {};
+      // Get capture data + metadata directly from content script (not service worker,
+      // whose in-memory store is lost when MV3 suspends it).
+      // Metadata is collected in the page context so viewport reflects the actual page.
+      let captureData: {
+        data?: { console?: unknown[]; network?: unknown[]; metadata?: BrowserMetadata | null };
+      } = {};
       if (tabId) {
         try {
           captureData = await chrome.tabs.sendMessage(tabId, { type: 'GET_CAPTURE_DATA' });
@@ -112,19 +98,22 @@ export function Popup() {
         }
       }
 
-      const metadata: BrowserMetadata = {
+      // Use metadata from content script (page context); fall back to minimal popup metadata
+      const metadata: BrowserMetadata = captureData?.data?.metadata ?? {
         userAgent: navigator.userAgent,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
+        viewport: { width: 0, height: 0 },
         url: tab?.url ?? '',
         timestamp: Date.now(),
         platform: navigator.platform,
         language: navigator.language,
         screen: { width: screen.width, height: screen.height },
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        browser: detectBrowser(navigator.userAgent),
-        os: detectOS(navigator.userAgent),
-        version: chrome.runtime.getManifest().version,
+        browser: 'Unknown',
+        os: 'Unknown',
+        version: '',
       };
+      // Always set version from the extension manifest (not available in content scripts)
+      metadata.version = chrome.runtime.getManifest().version;
 
       const response = await chrome.runtime.sendMessage({
         type: 'SUBMIT_REPORT',

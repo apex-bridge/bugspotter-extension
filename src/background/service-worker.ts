@@ -81,6 +81,7 @@ async function handleSubmit(
 
   deduplicator.markInProgress(payload.title, payload.description);
 
+  let succeeded = false;
   try {
     // Step 1: Create report (retry is handled inside the API client)
     const result = await createReport(payload);
@@ -102,11 +103,9 @@ async function handleSubmit(
       await confirmUpload(result.data.id, 'replay');
     }
 
-    deduplicator.markComplete(payload.title, payload.description);
+    succeeded = true;
     return result.data;
   } catch (err) {
-    deduplicator.markComplete(payload.title, payload.description);
-
     // Queue for offline retry on network errors.
     // We don't persist screenshot/replay data in the queue, so clear those
     // flags to prevent the server from expecting uploads that won't arrive.
@@ -127,6 +126,13 @@ async function handleSubmit(
     }
 
     throw err;
+  } finally {
+    if (succeeded) {
+      deduplicator.markComplete(payload.title, payload.description);
+    } else {
+      // Don't mark complete on failure — allows immediate retry
+      deduplicator.clear();
+    }
   }
 }
 

@@ -35,13 +35,16 @@ describe('utils/deduplicator', () => {
 
   it('allows resubmission after window expires', () => {
     vi.useFakeTimers();
-    dedup.markInProgress('Bug title', 'description');
-    dedup.markComplete('Bug title', 'description');
-    expect(dedup.isDuplicate('Bug title', 'description')).toBe(true);
+    try {
+      dedup.markInProgress('Bug title', 'description');
+      dedup.markComplete('Bug title', 'description');
+      expect(dedup.isDuplicate('Bug title', 'description')).toBe(true);
 
-    vi.advanceTimersByTime(6000);
-    expect(dedup.isDuplicate('Bug title', 'description')).toBe(false);
-    vi.useRealTimers();
+      vi.advanceTimersByTime(6000);
+      expect(dedup.isDuplicate('Bug title', 'description')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('evicts oldest entry when cache is full', () => {

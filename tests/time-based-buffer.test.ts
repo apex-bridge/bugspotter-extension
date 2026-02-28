@@ -15,30 +15,36 @@ describe('utils/time-based-buffer', () => {
 
   it('prunes events older than duration', () => {
     vi.useFakeTimers();
-    const buf = new TimeBasedBuffer(5); // 5 seconds
+    try {
+      const buf = new TimeBasedBuffer(5); // 5 seconds
 
-    buf.add(makeEvent(3));
-    vi.advanceTimersByTime(6000);
-    buf.add(makeEvent(3)); // trigger prune
+      buf.add(makeEvent(3));
+      vi.advanceTimersByTime(6000);
+      buf.add(makeEvent(3)); // trigger prune
 
-    const events = buf.getEvents();
-    expect(events.length).toBe(1);
-    vi.useRealTimers();
+      const events = buf.getEvents();
+      expect(events.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('preserves FullSnapshot even if older than cutoff', () => {
     vi.useFakeTimers();
-    const buf = new TimeBasedBuffer(5);
+    try {
+      const buf = new TimeBasedBuffer(5);
 
-    // Add a full snapshot (type 2)
-    buf.add(makeEvent(2));
-    vi.advanceTimersByTime(6000);
-    buf.add(makeEvent(3)); // newer event
+      // Add a full snapshot (type 2)
+      buf.add(makeEvent(2));
+      vi.advanceTimersByTime(6000);
+      buf.add(makeEvent(3)); // newer event
 
-    const events = buf.getEvents();
-    // The full snapshot should be preserved
-    expect(events.some((e) => e.type === 2)).toBe(true);
-    vi.useRealTimers();
+      const events = buf.getEvents();
+      // The full snapshot should be preserved
+      expect(events.some((e) => e.type === 2)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears all events', () => {

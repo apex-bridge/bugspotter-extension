@@ -93,7 +93,10 @@ export type MessageType =
   | { type: 'CAPTURE_SCREENSHOT' }
   | { type: 'SCREENSHOT_CAPTURED'; data: string }
   | { type: 'GET_CAPTURE_DATA' }
-  | { type: 'CAPTURE_DATA'; data: { console: ConsoleEntry[]; network: NetworkEntry[] } }
+  | {
+      type: 'CAPTURE_DATA';
+      data: { console: ConsoleEntry[]; network: NetworkEntry[]; metadata: BrowserMetadata | null };
+    }
   | { type: 'CONSOLE_ENTRY'; data: ConsoleEntry }
   | { type: 'NETWORK_ENTRY'; data: NetworkEntry }
   | { type: 'START_ANNOTATION'; screenshot: string }
