@@ -1,7 +1,16 @@
-import type { ConsoleEntry } from '@/types';
+/**
+ * Enhanced console capture with CircularBuffer, stack traces, filtering, and sanitization.
+ * Ported from bugspotter-sdk/src/capture/console.ts
+ */
 
-const MAX_ENTRIES = 50;
-const buffer: ConsoleEntry[] = [];
+import type { ConsoleEntry } from '@/types';
+import { CircularBuffer } from '@bugspotter/common';
+import type { Sanitizer } from '@bugspotter/common';
+
+const BUGSPOTTER_LOG_PREFIX = '[BugSpotter]';
+
+let buffer: CircularBuffer<ConsoleEntry>;
+let sanitizer: Sanitizer | null = null;
 
 const originalConsole = {
   log: console.log,
@@ -11,10 +20,46 @@ const originalConsole = {
   debug: console.debug,
 };
 
+function formatArgs(args: unknown[]): string {
+  const processedArgs = sanitizer ? sanitizer.sanitizeConsoleArgs(args) : args;
+
+  return processedArgs
+    .map((arg) => {
+      if (arg === null) return 'null';
+      if (arg === undefined) return 'undefined';
+      if (typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return `[${(arg as { constructor?: { name?: string } }).constructor?.name || 'Object'}]`;
+        }
+      }
+      return String(arg);
+    })
+    .join(' ');
+}
+
+function captureStack(): string | undefined {
+  const stack = new Error().stack;
+  // Remove first 4 lines: Error, captureStack, captureEntry, console[level]
+  return stack?.split('\n').slice(4).join('\n');
+}
+
+function shouldFilter(message: string, level: ConsoleEntry['level']): boolean {
+  // Always keep errors for debugging
+  if (level === 'error') return false;
+  // Filter our own SDK logs
+  return message.startsWith(BUGSPOTTER_LOG_PREFIX);
+}
+
 function captureEntry(level: ConsoleEntry['level'], args: unknown[]) {
+  const message = formatArgs(args);
+
+  if (shouldFilter(message, level)) return;
+
   const entry: ConsoleEntry = {
     level,
-    message: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '),
+    message,
     timestamp: Date.now(),
     args: args.map((a) => {
       try {
@@ -25,17 +70,25 @@ function captureEntry(level: ConsoleEntry['level'], args: unknown[]) {
     }),
   };
 
-  if (buffer.length >= MAX_ENTRIES) {
-    buffer.shift();
+  // Capture stack trace for error and warn levels
+  if (level === 'error' || level === 'warn') {
+    const stack = captureStack();
+    if (stack) {
+      entry.stack = sanitizer ? (sanitizer.sanitize(stack) as string) : stack;
+    }
   }
-  buffer.push(entry);
+
+  buffer.add(entry);
 
   chrome.runtime.sendMessage({ type: 'CONSOLE_ENTRY', data: entry }).catch(() => {
     // Extension context may be invalidated
   });
 }
 
-export function initConsoleCapture() {
+export function initConsoleCapture(maxEntries = 100, sanitizerInstance?: Sanitizer) {
+  buffer = new CircularBuffer<ConsoleEntry>(maxEntries);
+  sanitizer = sanitizerInstance ?? null;
+
   const levels = ['log', 'info', 'warn', 'error', 'debug'] as const;
   for (const level of levels) {
     console[level] = (...args: unknown[]) => {
@@ -46,5 +99,12 @@ export function initConsoleCapture() {
 }
 
 export function getConsoleLogs(): ConsoleEntry[] {
-  return [...buffer];
+  return buffer.getAll();
+}
+
+export function destroyConsoleCapture() {
+  const levels = ['log', 'info', 'warn', 'error', 'debug'] as const;
+  for (const level of levels) {
+    console[level] = originalConsole[level];
+  }
 }

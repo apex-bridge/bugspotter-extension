@@ -1,19 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-let initNetworkCapture: () => void;
-let getNetworkRequests: () => { url: string; method: string; status: number; duration: number }[];
+let initNetworkCapture: (maxEntries?: number) => void;
+let getNetworkRequests: () => {
+  url: string;
+  method: string;
+  status: number;
+  duration: number;
+  error?: string;
+  requestBody?: string;
+}[];
 
 describe('content/network-capture', () => {
   beforeEach(async () => {
     vi.resetModules();
 
-    // Provide a mock base fetch on window that the module will wrap
     window.fetch = vi.fn().mockResolvedValue({
       status: 200,
       statusText: 'OK',
     }) as unknown as typeof window.fetch;
 
-    // Mock PerformanceObserver
     vi.stubGlobal(
       'PerformanceObserver',
       class {
@@ -39,13 +44,11 @@ describe('content/network-capture', () => {
     expect(req!.status).toBe(200);
   });
 
-  it('records network errors', async () => {
-    // Set up a fetch that will fail when called by the interceptor
+  it('records network errors with error field', async () => {
     window.fetch = vi
       .fn()
       .mockRejectedValue(new Error('Network failure')) as unknown as typeof window.fetch;
 
-    // Re-import to pick up the failing fetch
     vi.resetModules();
     vi.stubGlobal(
       'PerformanceObserver',
@@ -62,10 +65,10 @@ describe('content/network-capture', () => {
     const req = requests.find((r) => r.url === 'https://api.example.com/fail');
     expect(req).toBeDefined();
     expect(req!.status).toBe(0);
-    expect(req!.statusText).toBe('Network Error');
+    expect(req!.error).toBe('Network failure');
   });
 
-  it('limits buffer to 50 entries', async () => {
+  it('defaults to 50 entries buffer', async () => {
     initNetworkCapture();
 
     for (let i = 0; i < 60; i++) {
@@ -74,6 +77,31 @@ describe('content/network-capture', () => {
 
     const requests = getNetworkRequests();
     expect(requests.length).toBe(50);
+  });
+
+  it('respects custom buffer size', async () => {
+    initNetworkCapture(20);
+
+    for (let i = 0; i < 30; i++) {
+      await window.fetch(`https://api.example.com/${i}`);
+    }
+
+    const requests = getNetworkRequests();
+    expect(requests.length).toBe(20);
+  });
+
+  it('captures request body from fetch', async () => {
+    initNetworkCapture();
+
+    await window.fetch('https://api.example.com/data', {
+      method: 'POST',
+      body: '{"key":"value"}',
+    });
+
+    const requests = getNetworkRequests();
+    const req = requests.find((r) => r.url === 'https://api.example.com/data');
+    expect(req).toBeDefined();
+    expect(req!.requestBody).toBe('{"key":"value"}');
   });
 
   it('returns a copy of the buffer', async () => {

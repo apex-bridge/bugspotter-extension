@@ -3,6 +3,7 @@ export interface ConsoleEntry {
   message: string;
   timestamp: number;
   args: unknown[];
+  stack?: string;
 }
 
 export interface NetworkEntry {
@@ -13,6 +14,9 @@ export interface NetworkEntry {
   duration: number;
   timestamp: number;
   headers: Record<string, string>;
+  requestBody?: string;
+  responseBody?: string;
+  error?: string;
 }
 
 export interface BrowserMetadata {
@@ -24,13 +28,15 @@ export interface BrowserMetadata {
   language: string;
   screen: { width: number; height: number };
   timezone: string;
+  browser: string;
+  os: string;
+  version: string;
 }
 
 export interface BugReportPayload {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
-  project_id: string;
   report: {
     console: ConsoleEntry[];
     network: NetworkEntry[];
@@ -51,6 +57,10 @@ export interface CreateReportResponse {
         uploadUrl: string;
         storageKey: string;
       };
+      replay?: {
+        uploadUrl: string;
+        storageKey: string;
+      };
     };
   };
 }
@@ -63,6 +73,12 @@ export interface Project {
 export interface Settings {
   baseUrl: string;
   apiKey: string;
+  allowedDomains: string[];
+  sanitizationEnabled: boolean;
+  sanitizationPatterns: string[];
+  replayEnabled: boolean;
+  maxConsoleEntries: number;
+  maxNetworkEntries: number;
 }
 
 export interface CaptureData {
@@ -84,4 +100,8 @@ export type MessageType =
   | { type: 'START_ANNOTATION'; screenshot: string }
   | { type: 'ANNOTATION_DONE'; data: string }
   | { type: 'ANNOTATION_CANCEL' }
-  | { type: 'SUBMIT_REPORT'; data: BugReportPayload & { screenshotDataUrl: string } };
+  | { type: 'SUBMIT_REPORT'; data: BugReportPayload & { screenshotDataUrl: string } }
+  | { type: 'GET_REPLAY_EVENTS' }
+  | { type: 'REPLAY_EVENTS'; data: unknown[] }
+  | { type: 'START_REPLAY' }
+  | { type: 'STOP_REPLAY' };

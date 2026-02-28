@@ -1,33 +1,22 @@
-import type { ConsoleEntry, NetworkEntry, BugReportPayload } from '@/types';
-import { createReport, uploadScreenshot, confirmUpload } from '@/api/bugspotter-client';
+import type { BugReportPayload } from '@/types';
+import {
+  createReport,
+  uploadScreenshot,
+  uploadReplay,
+  confirmUpload,
+} from '@/api/bugspotter-client';
+import { BugReportDeduplicator } from '@bugspotter/common';
+import { OfflineQueue } from '@/utils/offline-queue';
+import { getSettings } from '@/storage/settings';
+import { gzipCompress, compressImage } from '@/utils/compress';
 
-// In-memory store for capture data from content scripts
-const captureStore: Record<number, { console: ConsoleEntry[]; network: NetworkEntry[] }> = {};
+const deduplicator = new BugReportDeduplicator();
+const offlineQueue = new OfflineQueue({ enabled: true, maxQueueSize: 10 });
 
-function getTabStore(tabId: number) {
-  if (!captureStore[tabId]) {
-    captureStore[tabId] = { console: [], network: [] };
-  }
-  return captureStore[tabId];
-}
+// Store annotated screenshot so it survives popup close/reopen
+let pendingAnnotatedScreenshot: string | null = null;
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const tabId = sender.tab?.id;
-
-  if (message.type === 'CONSOLE_ENTRY' && tabId) {
-    const store = getTabStore(tabId);
-    if (store.console.length >= 50) store.console.shift();
-    store.console.push(message.data);
-    return false;
-  }
-
-  if (message.type === 'NETWORK_ENTRY' && tabId) {
-    const store = getTabStore(tabId);
-    if (store.network.length >= 50) store.network.shift();
-    store.network.push(message.data);
-    return false;
-  }
-
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'CAPTURE_SCREENSHOT') {
     chrome.tabs
       .captureVisibleTab({ format: 'png' })
@@ -40,11 +29,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'GET_CAPTURE_DATA') {
-    const activeTabId = message.tabId as number;
-    const store = captureStore[activeTabId] ?? { console: [], network: [] };
-    sendResponse({ type: 'CAPTURE_DATA', data: store });
+  // Store annotated screenshot so it persists after popup closes during annotation
+  if (message.type === 'ANNOTATION_DONE' && message.data) {
+    pendingAnnotatedScreenshot = message.data as string;
     return false;
+  }
+
+  // Popup asks if there's a pending annotated screenshot (after reopening)
+  if (message.type === 'GET_PENDING_SCREENSHOT') {
+    const data = pendingAnnotatedScreenshot;
+    pendingAnnotatedScreenshot = null;
+    sendResponse({ data });
+    return false;
+  }
+
+  if (message.type === 'GET_OFFLINE_QUEUE_SIZE') {
+    offlineQueue.size().then((size) => sendResponse({ size }));
+    return true;
   }
 
   if (message.type === 'SUBMIT_REPORT') {
@@ -61,22 +62,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function handleSubmit(data: BugReportPayload & { screenshotDataUrl: string }) {
-  const { screenshotDataUrl, ...payload } = data;
+async function handleSubmit(
+  data: BugReportPayload & { screenshotDataUrl: string; replayEvents?: unknown[] },
+) {
+  const { screenshotDataUrl, replayEvents, ...payload } = data;
 
-  // Step 1: Create report
-  const result = await createReport(payload);
-
-  // Step 2: Upload screenshot if present
-  if (screenshotDataUrl && result.data.presignedUrls?.screenshot) {
-    const blob = await dataUrlToBlob(screenshotDataUrl);
-    await uploadScreenshot(result.data.presignedUrls.screenshot.uploadUrl, blob);
-
-    // Step 3: Confirm upload
-    await confirmUpload(result.data.id);
+  // Deduplication check
+  if (deduplicator.isDuplicate(payload.title, payload.description)) {
+    throw new Error('Duplicate report detected. Please wait before resubmitting.');
   }
 
-  return result.data;
+  deduplicator.markInProgress(payload.title, payload.description);
+
+  try {
+    // Step 1: Create report (retry is handled inside the API client)
+    const result = await createReport(payload);
+
+    // Step 2: Upload screenshot if present (compress first)
+    if (screenshotDataUrl && result.data.presignedUrls?.screenshot) {
+      const optimized = await compressImage(screenshotDataUrl);
+      const blob = await dataUrlToBlob(optimized);
+      await uploadScreenshot(result.data.presignedUrls.screenshot.uploadUrl, blob);
+      await confirmUpload(result.data.id, 'screenshot');
+    }
+
+    // Step 3: Upload replay if present
+    if (replayEvents && replayEvents.length > 0 && result.data.presignedUrls?.replay) {
+      const replayJson = JSON.stringify(replayEvents);
+      const compressed = await gzipCompress(replayJson);
+      await uploadReplay(result.data.presignedUrls.replay.uploadUrl, compressed);
+      await confirmUpload(result.data.id, 'replay');
+    }
+
+    deduplicator.markComplete(payload.title, payload.description);
+    return result.data;
+  } catch (err) {
+    deduplicator.markComplete(payload.title, payload.description);
+
+    // Queue for offline retry on network errors
+    if (isNetworkError(err)) {
+      const settings = await getSettings();
+      await offlineQueue.enqueue(
+        `${settings.baseUrl.replace(/\/$/, '')}/api/v1/reports`,
+        JSON.stringify(payload),
+        { 'Content-Type': 'application/json', 'X-API-Key': settings.apiKey },
+      );
+    }
+
+    throw err;
+  }
+}
+
+function isNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes('failed to fetch') ||
+    msg.includes('network') ||
+    msg.includes('timeout') ||
+    msg.includes('connection')
+  );
 }
 
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
@@ -84,9 +129,20 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return response.blob();
 }
 
-// Clean up tab data when tab is closed
-chrome.tabs.onRemoved.addListener((tabId) => {
-  delete captureStore[tabId];
+// Process offline queue on startup and when coming back online
+async function processOfflineQueue() {
+  const settings = await getSettings();
+  if (!settings.baseUrl || !settings.apiKey) return;
+  const authHeaders = { 'X-API-Key': settings.apiKey };
+  await offlineQueue.processQueue(authHeaders);
+}
+
+// Process queue on service worker activation
+processOfflineQueue().catch(() => {});
+
+// Clean up on tab close
+chrome.tabs.onRemoved.addListener(() => {
+  pendingAnnotatedScreenshot = null;
 });
 
 // Set badge

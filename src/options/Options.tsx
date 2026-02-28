@@ -1,10 +1,50 @@
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings } from '@/storage/settings';
 import { validateConnection } from '@/api/bugspotter-client';
+import {
+  getAllPatternNames,
+  PATTERN_PRESETS,
+  type PIIPatternName,
+  type PatternPresetName,
+} from '@bugspotter/common';
+
+const ALL_PATTERNS = getAllPatternNames();
+
+const PRESET_LABELS: Record<PatternPresetName, string> = {
+  all: 'All patterns',
+  minimal: 'Minimal (email, credit card, SSN)',
+  financial: 'Financial (credit card, SSN)',
+  contact: 'Contact (email, phone)',
+  identification: 'Identification (SSN, IIN)',
+  credentials: 'Credentials (API keys, tokens, passwords)',
+  kazakhstan: 'Kazakhstan (email, phone, IIN)',
+  gdpr: 'GDPR (email, phone, IP)',
+  pci: 'PCI DSS (credit card)',
+  security: 'Security (PII + credentials)',
+};
+
+const PATTERN_LABELS: Record<PIIPatternName, string> = {
+  email: 'Email addresses',
+  creditcard: 'Credit card numbers',
+  ssn: 'Social Security Numbers',
+  iin: 'Kazakhstan IIN/BIN',
+  ip: 'IP addresses',
+  phone: 'Phone numbers',
+  apikey: 'API keys',
+  token: 'Auth tokens',
+  password: 'Passwords',
+};
 
 export function Options() {
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
+  const [newDomain, setNewDomain] = useState('');
+  const [sanitizationEnabled, setSanitizationEnabled] = useState(true);
+  const [sanitizationPatterns, setSanitizationPatterns] = useState<string[]>(ALL_PATTERNS);
+  const [replayEnabled, setReplayEnabled] = useState(false);
+  const [maxConsoleEntries, setMaxConsoleEntries] = useState(100);
+  const [maxNetworkEntries, setMaxNetworkEntries] = useState(50);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -12,29 +52,73 @@ export function Options() {
     getSettings().then((s) => {
       setBaseUrl(s.baseUrl);
       setApiKey(s.apiKey);
+      setAllowedDomains(s.allowedDomains);
+      setSanitizationEnabled(s.sanitizationEnabled);
+      setSanitizationPatterns(s.sanitizationPatterns);
+      setReplayEnabled(s.replayEnabled);
+      setMaxConsoleEntries(s.maxConsoleEntries);
+      setMaxNetworkEntries(s.maxNetworkEntries);
     });
   }, []);
+
+  const togglePattern = (pattern: string) => {
+    setSanitizationPatterns((prev) =>
+      prev.includes(pattern) ? prev.filter((p) => p !== pattern) : [...prev, pattern],
+    );
+  };
+
+  const applyPreset = (preset: PatternPresetName) => {
+    setSanitizationPatterns([...PATTERN_PRESETS[preset]]);
+  };
+
+  const addDomain = () => {
+    const domain = newDomain.trim().toLowerCase();
+    if (domain && !allowedDomains.includes(domain)) {
+      setAllowedDomains((prev) => [...prev, domain]);
+      setNewDomain('');
+    }
+  };
+
+  const removeDomain = (domain: string) => {
+    setAllowedDomains((prev) => prev.filter((d) => d !== domain));
+  };
 
   const handleSave = async () => {
     setStatus('saving');
     setErrorMsg('');
 
-    // Validate API key format
     if (apiKey && !/^bgs_[a-zA-Z0-9_-]{43}$/.test(apiKey)) {
       setStatus('error');
       setErrorMsg('Invalid API key format. Expected: bgs_[a-zA-Z0-9_-]{43}');
       return;
     }
 
-    // Validate connection
-    const valid = await validateConnection({ baseUrl, apiKey });
+    const valid = await validateConnection({
+      baseUrl,
+      apiKey,
+      allowedDomains,
+      sanitizationEnabled,
+      sanitizationPatterns,
+      replayEnabled,
+      maxConsoleEntries,
+      maxNetworkEntries,
+    });
     if (!valid) {
       setStatus('error');
       setErrorMsg('Could not connect to BugSpotter. Check URL and API key.');
       return;
     }
 
-    await saveSettings({ baseUrl, apiKey });
+    await saveSettings({
+      baseUrl,
+      apiKey,
+      allowedDomains,
+      sanitizationEnabled,
+      sanitizationPatterns,
+      replayEnabled,
+      maxConsoleEntries,
+      maxNetworkEntries,
+    });
     setStatus('saved');
     setTimeout(() => setStatus('idle'), 2000);
   };
@@ -44,29 +128,193 @@ export function Options() {
       <div className="w-full max-w-md p-6">
         <h1 className="text-xl font-bold mb-6">BugSpotter Settings</h1>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">BugSpotter Instance URL</label>
-            <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://bugspotter.example.com"
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500"
-            />
-          </div>
+        <div className="space-y-5">
+          {/* Connection */}
+          <section>
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+              Connection
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Instance URL</label>
+                <input
+                  type="url"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="https://bugspotter.example.com"
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="bgs_..."
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 font-mono"
+                />
+              </div>
+            </div>
+          </section>
 
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">API Key</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="bgs_..."
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 font-mono"
-            />
-          </div>
+          {/* Allowed Domains */}
+          <section>
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+              Allowed Domains
+            </h2>
+            <p className="text-xs text-gray-500 mb-2">
+              Only capture data on these domains. Leave empty to run on all sites. Supports
+              wildcards: *.example.com
+            </p>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={newDomain}
+                onChange={(e) => setNewDomain(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addDomain()}
+                placeholder="example.com"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500"
+              />
+              <button
+                onClick={addDomain}
+                disabled={!newDomain.trim()}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 rounded text-sm font-medium"
+              >
+                Add
+              </button>
+            </div>
+            {allowedDomains.length > 0 ? (
+              <div className="space-y-1">
+                {allowedDomains.map((domain) => (
+                  <div
+                    key={domain}
+                    className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded px-3 py-1.5"
+                  >
+                    <span className="text-sm font-mono text-gray-300">{domain}</span>
+                    <button
+                      onClick={() => removeDomain(domain)}
+                      className="text-gray-500 hover:text-red-400 text-sm ml-2"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-600 italic">All domains (no filter)</p>
+            )}
+          </section>
 
+          {/* PII Sanitization */}
+          <section>
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+              PII Sanitization
+            </h2>
+            <label className="flex items-center gap-2 mb-2">
+              <input
+                type="checkbox"
+                checked={sanitizationEnabled}
+                onChange={(e) => setSanitizationEnabled(e.target.checked)}
+                className="accent-blue-500"
+              />
+              <span className="text-sm">Enable PII redaction in captured data</span>
+            </label>
+            {sanitizationEnabled && (
+              <div className="ml-5 space-y-2">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Quick preset</label>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) applyPreset(e.target.value as PatternPresetName);
+                    }}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                  >
+                    <option value="">Select a preset...</option>
+                    {(Object.keys(PRESET_LABELS) as PatternPresetName[]).map((key) => (
+                      <option key={key} value={key}>
+                        {PRESET_LABELS[key]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  {ALL_PATTERNS.map((pattern) => (
+                    <label key={pattern} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={sanitizationPatterns.includes(pattern)}
+                        onChange={() => togglePattern(pattern)}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-xs text-gray-300">{PATTERN_LABELS[pattern]}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* Session Replay */}
+          <section>
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+              Session Replay
+            </h2>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={replayEnabled}
+                onChange={(e) => setReplayEnabled(e.target.checked)}
+                className="accent-blue-500"
+              />
+              <span className="text-sm">Enable session replay recording</span>
+            </label>
+            {replayEnabled && (
+              <p className="text-xs text-yellow-400 mt-1 ml-5">
+                Session replay may slightly impact page performance.
+              </p>
+            )}
+          </section>
+
+          {/* Buffer Sizes */}
+          <section>
+            <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+              Capture Buffers
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Max console entries ({maxConsoleEntries})
+                </label>
+                <input
+                  type="range"
+                  min={10}
+                  max={500}
+                  step={10}
+                  value={maxConsoleEntries}
+                  onChange={(e) => setMaxConsoleEntries(Number(e.target.value))}
+                  className="w-full accent-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Max network entries ({maxNetworkEntries})
+                </label>
+                <input
+                  type="range"
+                  min={10}
+                  max={500}
+                  step={10}
+                  value={maxNetworkEntries}
+                  onChange={(e) => setMaxNetworkEntries(Number(e.target.value))}
+                  className="w-full accent-blue-500"
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Status Messages */}
           {errorMsg && <p className="text-red-400 text-sm">{errorMsg}</p>}
           {status === 'saved' && (
             <p className="text-green-400 text-sm">Settings saved and validated.</p>

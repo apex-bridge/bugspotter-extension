@@ -3,6 +3,7 @@ import {
   fetchProjects,
   createReport,
   uploadScreenshot,
+  uploadReplay,
   confirmUpload,
   validateConnection,
 } from '@/api/bugspotter-client';
@@ -36,6 +37,8 @@ describe('api/bugspotter-client', () => {
       await configureSettings();
       mockFetch.mockResolvedValue({
         ok: true,
+        status: 200,
+        headers: new Headers(),
         json: () => Promise.resolve({ success: true, data: [{ id: '1', name: 'Project A' }] }),
       });
 
@@ -51,16 +54,17 @@ describe('api/bugspotter-client', () => {
       );
     });
 
-    it('throws on 401', async () => {
+    it('returns placeholder on 401 (API key auth)', async () => {
       await configureSettings();
-      mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' });
-      await expect(fetchProjects()).rejects.toThrow('Invalid API key');
-    });
-
-    it('throws on 403', async () => {
-      await configureSettings();
-      mockFetch.mockResolvedValue({ ok: false, status: 403, statusText: 'Forbidden' });
-      await expect(fetchProjects()).rejects.toThrow('Quota exceeded');
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        headers: new Headers(),
+      });
+      // fetchProjects catches the error and returns a fallback
+      const projects = await fetchProjects();
+      expect(projects).toEqual([{ id: 'api-key-project', name: 'API Key Project' }]);
     });
   });
 
@@ -71,7 +75,6 @@ describe('api/bugspotter-client', () => {
         title: 'Bug title',
         description: 'desc',
         priority: 'high' as const,
-        project_id: 'proj-1',
         report: {
           console: [],
           network: [],
@@ -84,6 +87,9 @@ describe('api/bugspotter-client', () => {
             language: 'en',
             screen: { width: 1920, height: 1080 },
             timezone: 'UTC',
+            browser: 'Chrome',
+            os: 'Windows',
+            version: '',
           },
         },
         hasScreenshot: true,
@@ -92,6 +98,8 @@ describe('api/bugspotter-client', () => {
 
       mockFetch.mockResolvedValue({
         ok: true,
+        status: 200,
+        headers: new Headers(),
         json: () =>
           Promise.resolve({
             success: true,
@@ -110,7 +118,7 @@ describe('api/bugspotter-client', () => {
 
   describe('uploadScreenshot', () => {
     it('PUTs blob to presigned URL', async () => {
-      mockFetch.mockResolvedValue({ ok: true });
+      mockFetch.mockResolvedValue({ ok: true, status: 200, headers: new Headers() });
       const blob = new Blob(['png'], { type: 'image/png' });
 
       await uploadScreenshot('https://s3.example.com/upload', blob);
@@ -120,8 +128,8 @@ describe('api/bugspotter-client', () => {
       );
     });
 
-    it('throws on upload failure', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    it('throws on upload failure after retries', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 500, headers: new Headers() });
       const blob = new Blob(['png']);
       await expect(uploadScreenshot('https://s3.example.com/upload', blob)).rejects.toThrow(
         'Screenshot upload failed',
@@ -129,10 +137,28 @@ describe('api/bugspotter-client', () => {
     });
   });
 
+  describe('uploadReplay', () => {
+    it('PUTs gzip blob to presigned URL', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 200, headers: new Headers() });
+      const blob = new Blob(['gzipped'], { type: 'application/gzip' });
+
+      await uploadReplay('https://s3.example.com/replay', blob);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://s3.example.com/replay',
+        expect.objectContaining({ method: 'PUT', body: blob }),
+      );
+    });
+  });
+
   describe('confirmUpload', () => {
-    it('POSTs confirm with fileType', async () => {
+    it('POSTs confirm with screenshot fileType', async () => {
       await configureSettings();
-      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ success: true }) });
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () => Promise.resolve({ success: true }),
+      });
 
       await confirmUpload('bug-1');
       expect(mockFetch).toHaveBeenCalledWith(
@@ -140,6 +166,25 @@ describe('api/bugspotter-client', () => {
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ fileType: 'screenshot' }),
+        }),
+      );
+    });
+
+    it('POSTs confirm with replay fileType', async () => {
+      await configureSettings();
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () => Promise.resolve({ success: true }),
+      });
+
+      await confirmUpload('bug-1', 'replay');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://bugs.test.com/api/v1/reports/bug-1/confirm-upload',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ fileType: 'replay' }),
         }),
       );
     });
@@ -151,6 +196,12 @@ describe('api/bugspotter-client', () => {
       const result = await validateConnection({
         baseUrl: 'https://bugs.test.com',
         apiKey: 'bgs_key',
+        allowedDomains: [],
+        sanitizationEnabled: true,
+        sanitizationPatterns: [],
+        replayEnabled: false,
+        maxConsoleEntries: 100,
+        maxNetworkEntries: 50,
       });
       expect(result).toBe(true);
     });
@@ -160,6 +211,12 @@ describe('api/bugspotter-client', () => {
       const result = await validateConnection({
         baseUrl: 'https://bugs.test.com',
         apiKey: 'bgs_bad',
+        allowedDomains: [],
+        sanitizationEnabled: true,
+        sanitizationPatterns: [],
+        replayEnabled: false,
+        maxConsoleEntries: 100,
+        maxNetworkEntries: 50,
       });
       expect(result).toBe(false);
     });
@@ -169,6 +226,12 @@ describe('api/bugspotter-client', () => {
       const result = await validateConnection({
         baseUrl: 'https://bugs.test.com',
         apiKey: 'bgs_key',
+        allowedDomains: [],
+        sanitizationEnabled: true,
+        sanitizationPatterns: [],
+        replayEnabled: false,
+        maxConsoleEntries: 100,
+        maxNetworkEntries: 50,
       });
       expect(result).toBe(false);
     });

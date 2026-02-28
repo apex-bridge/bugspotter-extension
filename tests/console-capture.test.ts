@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// We need to re-import fresh modules per test to reset the buffer
-let initConsoleCapture: () => void;
-let getConsoleLogs: () => { level: string; message: string; timestamp: number; args: unknown[] }[];
+let initConsoleCapture: (maxEntries?: number) => void;
+let getConsoleLogs: () => {
+  level: string;
+  message: string;
+  timestamp: number;
+  args: unknown[];
+  stack?: string;
+}[];
 
 describe('content/console-capture', () => {
   beforeEach(async () => {
@@ -22,33 +27,51 @@ describe('content/console-capture', () => {
     expect(last.message).toBe('test message');
   });
 
-  it('captures console.error calls', () => {
+  it('captures console.error calls with stack trace', () => {
     initConsoleCapture();
     console.error('error happened');
     const logs = getConsoleLogs();
     const errorLog = logs.find((l) => l.message === 'error happened');
     expect(errorLog).toBeDefined();
     expect(errorLog!.level).toBe('error');
+    expect(errorLog!.stack).toBeDefined();
   });
 
-  it('captures console.warn calls', () => {
+  it('captures console.warn calls with stack trace', () => {
     initConsoleCapture();
     console.warn('warning');
     const logs = getConsoleLogs();
     const warnLog = logs.find((l) => l.message === 'warning');
     expect(warnLog).toBeDefined();
     expect(warnLog!.level).toBe('warn');
+    expect(warnLog!.stack).toBeDefined();
   });
 
-  it('limits buffer to 50 entries', () => {
+  it('defaults to 100 entries buffer', () => {
     initConsoleCapture();
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       console.log(`message ${i}`);
     }
     const logs = getConsoleLogs();
-    expect(logs.length).toBe(50);
-    // Oldest should have been evicted
-    expect(logs[0].message).toContain('message');
+    expect(logs.length).toBe(100);
+  });
+
+  it('respects custom buffer size', () => {
+    initConsoleCapture(30);
+    for (let i = 0; i < 50; i++) {
+      console.log(`message ${i}`);
+    }
+    const logs = getConsoleLogs();
+    expect(logs.length).toBe(30);
+  });
+
+  it('filters [BugSpotter] prefixed logs (except errors)', () => {
+    initConsoleCapture();
+    console.log('[BugSpotter] internal debug');
+    console.error('[BugSpotter] internal error');
+    const logs = getConsoleLogs();
+    expect(logs.find((l) => l.message === '[BugSpotter] internal debug')).toBeUndefined();
+    expect(logs.find((l) => l.message === '[BugSpotter] internal error')).toBeDefined();
   });
 
   it('serializes non-string args', () => {

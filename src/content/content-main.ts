@@ -1,11 +1,130 @@
-import { initConsoleCapture, getConsoleLogs } from './console-capture';
-import { initNetworkCapture, getNetworkRequests } from './network-capture';
+import { startReplayRecording, stopReplayRecording, getReplayEvents } from './replay-recorder';
+import {
+  CircularBuffer,
+  createSanitizer,
+  type Sanitizer,
+  type PIIPatternName,
+} from '@bugspotter/common';
+import type { ConsoleEntry, NetworkEntry } from '@/types';
 
-initConsoleCapture();
-initNetworkCapture();
+// -- Buffers in the isolated world (populated via postMessage from main world) --
+let consoleBuffer: CircularBuffer<ConsoleEntry>;
+let networkBuffer: CircularBuffer<NetworkEntry>;
+let sanitizer: Sanitizer | null = null;
+let initialized = false;
+
+function getConsoleLogs(): ConsoleEntry[] {
+  return consoleBuffer?.getAll() ?? [];
+}
+
+function getNetworkRequests(): NetworkEntry[] {
+  return networkBuffer?.getAll() ?? [];
+}
+
+// Check if the current page's domain matches the allowlist.
+function isDomainAllowed(allowedDomains: string[]): boolean {
+  if (!allowedDomains || allowedDomains.length === 0) return true;
+  const hostname = window.location.hostname;
+  return allowedDomains.some((domain) => {
+    const d = domain.trim().toLowerCase();
+    if (!d) return false;
+    if (d.startsWith('*.')) {
+      const base = d.slice(2);
+      return hostname === base || hostname.endsWith('.' + base);
+    }
+    return hostname === d || hostname.endsWith('.' + d);
+  });
+}
+
+/**
+ * Inject the main-world capture script via <script src="...">.
+ * Chrome MV3 CSP blocks inline scripts, so we load the file from
+ * web_accessible_resources instead.
+ */
+function injectMainWorldCaptures() {
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL('main-world-capture.js');
+  script.onload = () => script.remove();
+  (document.documentElement || document.head || document.body).appendChild(script);
+}
+
+/** Listen for postMessage from the injected main-world script */
+function listenForMainWorldCaptures() {
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (!msg || msg.source !== 'bugspotter-capture') return;
+
+    if (msg.type === 'console' && msg.data) {
+      const entry = sanitizer
+        ? (sanitizer.sanitize(msg.data) as ConsoleEntry)
+        : (msg.data as ConsoleEntry);
+      consoleBuffer.add(entry);
+    }
+
+    if (msg.type === 'network' && msg.data) {
+      const entry = sanitizer
+        ? (sanitizer.sanitize(msg.data) as NetworkEntry)
+        : (msg.data as NetworkEntry);
+      networkBuffer.add(entry);
+    }
+  });
+}
+
+// Load settings and initialize
+async function init() {
+  const result = await chrome.storage.sync.get('bugspotter_settings');
+  const settings = result.bugspotter_settings ?? {};
+
+  const allowedDomains = (settings.allowedDomains as string[]) ?? [];
+  if (!isDomainAllowed(allowedDomains)) return;
+
+  const sanitizationEnabled = settings.sanitizationEnabled ?? true;
+  const sanitizationPatterns = settings.sanitizationPatterns as PIIPatternName[] | undefined;
+  const maxConsoleEntries = (settings.maxConsoleEntries as number) ?? 100;
+  const maxNetworkEntries = (settings.maxNetworkEntries as number) ?? 50;
+  const replayEnabled = (settings.replayEnabled as boolean) ?? false;
+
+  sanitizer = createSanitizer({
+    enabled: sanitizationEnabled,
+    patterns: sanitizationPatterns,
+  });
+
+  consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
+  networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+  initialized = true;
+
+  // Inject capture code into the page's main world
+  injectMainWorldCaptures();
+  listenForMainWorldCaptures();
+
+  // Start session replay if enabled (pass sanitizer for PII masking)
+  if (replayEnabled) {
+    try {
+      startReplayRecording(60, sanitizer ?? undefined);
+    } catch (err) {
+      console.error('[BugSpotter] Failed to start replay recording:', err);
+    }
+  }
+}
+
+init().catch((err) => {
+  console.error('[BugSpotter] Init failed, falling back to defaults:', err);
+  consoleBuffer = new CircularBuffer<ConsoleEntry>(100);
+  networkBuffer = new CircularBuffer<NetworkEntry>(50);
+  initialized = true;
+  injectMainWorldCaptures();
+  listenForMainWorldCaptures();
+});
 
 // Listen for messages from service worker / popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // If captures weren't initialized (domain not allowed), return empty data
+  if (!initialized && message.type === 'GET_CAPTURE_DATA') {
+    sendResponse({ type: 'CAPTURE_DATA', data: { console: [], network: [] } });
+    return true;
+  }
+
   if (message.type === 'GET_CAPTURE_DATA') {
     sendResponse({
       type: 'CAPTURE_DATA',
@@ -14,6 +133,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         network: getNetworkRequests(),
       },
     });
+    return true;
+  }
+
+  if (message.type === 'GET_REPLAY_EVENTS') {
+    sendResponse({
+      type: 'REPLAY_EVENTS',
+      data: getReplayEvents(),
+    });
+    return true;
+  }
+
+  if (message.type === 'START_REPLAY') {
+    startReplayRecording();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'STOP_REPLAY') {
+    stopReplayRecording();
+    sendResponse({ success: true });
     return true;
   }
 

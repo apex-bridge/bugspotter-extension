@@ -1,6 +1,6 @@
 {
   "name": "bugspotter-extension",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\" --fix",
     "format": "prettier --write \"**/*.{ts,tsx,json,css,html,md}\"",
@@ -25,12 +28,15 @@
     ]
   },
   "dependencies": {
+    "@bugspotter/common": "^1.0.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "rrweb": "^2.0.0-alpha.18"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
     "@eslint/js": "^9.39.2",
+    "@playwright/test": "^1.58.2",
     "@types/chrome": "^0.0.287",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
