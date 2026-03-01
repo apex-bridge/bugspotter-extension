@@ -1,19 +1,241 @@
-import { initConsoleCapture, getConsoleLogs } from './console-capture';
-import { initNetworkCapture, getNetworkRequests } from './network-capture';
+import { startReplayRecording, stopReplayRecording, getReplayEvents } from './replay-recorder';
+import { captureMetadata } from './metadata';
+import {
+  CircularBuffer,
+  createSanitizer,
+  type Sanitizer,
+  type PIIPatternName,
+} from '@bugspotter/common';
+import type { ConsoleEntry, NetworkEntry } from '@/types';
+import { getSettings } from '@/storage/settings';
 
-initConsoleCapture();
-initNetworkCapture();
+// -- Buffers in the isolated world (populated via postMessage from main world) --
+let consoleBuffer: CircularBuffer<ConsoleEntry>;
+let networkBuffer: CircularBuffer<NetworkEntry>;
+let sanitizer: Sanitizer | null = null;
+let initialized = false;
+
+function getConsoleLogs(): ConsoleEntry[] {
+  return consoleBuffer?.getAll() ?? [];
+}
+
+function getNetworkRequests(): NetworkEntry[] {
+  return networkBuffer?.getAll() ?? [];
+}
+
+// Check if the current page's domain matches the allowlist.
+function isDomainAllowed(allowedDomains: string[]): boolean {
+  if (!allowedDomains || allowedDomains.length === 0) return true;
+  const hostname = window.location.hostname;
+  return allowedDomains.some((domain) => {
+    const d = domain.trim().toLowerCase();
+    if (!d) return false;
+    if (d.startsWith('*.')) {
+      const base = d.slice(2);
+      return hostname === base || hostname.endsWith('.' + base);
+    }
+    return hostname === d;
+  });
+}
+
+/**
+ * Inject the main-world capture script via <script src="...">.
+ * Chrome MV3 CSP blocks inline scripts, so we load the file from
+ * web_accessible_resources instead.
+ */
+function injectMainWorldCaptures() {
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL('main-world-capture.js');
+  script.onload = () => script.remove();
+  (document.documentElement || document.head || document.body).appendChild(script);
+}
+
+// Caps for string fields coming from postMessage to prevent oversized entries
+const MAX_MESSAGE_LENGTH = 4000;
+const MAX_URL_LENGTH = 2000;
+const MAX_BODY_LENGTH = 4000;
+const MAX_STACK_LENGTH = 4000;
+
+function truncStr(val: unknown, max: number): string {
+  if (typeof val !== 'string') return '';
+  return val.length > max ? val.slice(0, max) : val;
+}
+
+const MAX_ARG_LENGTH = 4000;
+
+function capArg(arg: unknown): unknown {
+  if (typeof arg === 'string')
+    return arg.length > MAX_ARG_LENGTH ? arg.slice(0, MAX_ARG_LENGTH) : arg;
+  if (arg === null || arg === undefined || typeof arg !== 'object') return arg;
+  // Cap serialized size of object args
+  try {
+    const json = JSON.stringify(arg);
+    if (json.length > MAX_ARG_LENGTH) return json.slice(0, MAX_ARG_LENGTH);
+    return arg;
+  } catch {
+    return String(arg);
+  }
+}
+
+function validateConsoleEntry(data: unknown): ConsoleEntry | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.level !== 'string' || typeof d.timestamp !== 'number') return null;
+  const validLevels = ['log', 'info', 'warn', 'error', 'debug'];
+  if (!validLevels.includes(d.level)) return null;
+  return {
+    level: d.level as ConsoleEntry['level'],
+    message: truncStr(d.message, MAX_MESSAGE_LENGTH),
+    timestamp: d.timestamp,
+    args: Array.isArray(d.args) ? d.args.slice(0, 20).map(capArg) : [],
+    ...(typeof d.stack === 'string' ? { stack: truncStr(d.stack, MAX_STACK_LENGTH) } : {}),
+  };
+}
+
+const MAX_HEADERS = 50;
+const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const MAX_HEADER_KEY_LENGTH = 200;
+
+function sanitizeHeaders(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null) return {};
+  const entries = Object.entries(raw as Record<string, unknown>);
+  const result: Record<string, string> = {};
+  let count = 0;
+  for (const [rawKey, val] of entries) {
+    if (count >= MAX_HEADERS) break;
+    if (BLOCKED_KEYS.has(rawKey)) continue;
+    const key =
+      rawKey.length > MAX_HEADER_KEY_LENGTH ? rawKey.slice(0, MAX_HEADER_KEY_LENGTH) : rawKey;
+    result[key] = typeof val === 'string' ? val.slice(0, 1000) : String(val).slice(0, 1000);
+    count++;
+  }
+  return result;
+}
+
+function validateNetworkEntry(data: unknown): NetworkEntry | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.url !== 'string' || typeof d.timestamp !== 'number') return null;
+  return {
+    url: truncStr(d.url, MAX_URL_LENGTH),
+    method: typeof d.method === 'string' ? d.method.slice(0, 10) : 'GET',
+    status: typeof d.status === 'number' ? d.status : 0,
+    statusText: typeof d.statusText === 'string' ? d.statusText.slice(0, 100) : '',
+    duration: typeof d.duration === 'number' ? d.duration : 0,
+    timestamp: d.timestamp,
+    headers: sanitizeHeaders(d.headers),
+    ...(typeof d.requestBody === 'string'
+      ? { requestBody: truncStr(d.requestBody, MAX_BODY_LENGTH) }
+      : {}),
+    ...(typeof d.error === 'string' ? { error: d.error.slice(0, 500) } : {}),
+  };
+}
+
+/** Listen for postMessage from the injected main-world script */
+function listenForMainWorldCaptures() {
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (!msg || msg.source !== 'bugspotter-capture') return;
+
+    if (msg.type === 'console') {
+      const validated = validateConsoleEntry(msg.data);
+      if (!validated) return;
+      const entry = sanitizer ? (sanitizer.sanitize(validated) as ConsoleEntry) : validated;
+      consoleBuffer.add(entry);
+    }
+
+    if (msg.type === 'network') {
+      const validated = validateNetworkEntry(msg.data);
+      if (!validated) return;
+      const entry = sanitizer ? (sanitizer.sanitize(validated) as NetworkEntry) : validated;
+      networkBuffer.add(entry);
+    }
+  });
+}
+
+// Load settings and initialize
+async function init() {
+  const settings = await getSettings();
+
+  if (!isDomainAllowed(settings.allowedDomains)) return;
+
+  const sanitizationPatterns = settings.sanitizationPatterns as PIIPatternName[] | undefined;
+  const maxConsoleEntries = settings.maxConsoleEntries;
+  const maxNetworkEntries = settings.maxNetworkEntries;
+  const replayEnabled = settings.replayEnabled;
+
+  sanitizer = createSanitizer({
+    enabled: settings.sanitizationEnabled,
+    patterns: sanitizationPatterns,
+  });
+
+  consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
+  networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+  initialized = true;
+
+  // Listen first, then inject — ensures no early events are missed
+  listenForMainWorldCaptures();
+  injectMainWorldCaptures();
+
+  // Start session replay if enabled (pass sanitizer for PII masking)
+  if (replayEnabled) {
+    try {
+      startReplayRecording(60, sanitizer ?? undefined);
+    } catch (err) {
+      console.error('[BugSpotter] Failed to start replay recording:', err);
+    }
+  }
+}
+
+init().catch((err) => {
+  // Do not start captures on init failure — sanitizer and domain allowlist
+  // would be uninitialized, risking unsanitized PII capture on all pages.
+  // The `initialized` flag stays false, so GET_CAPTURE_DATA returns empty data.
+  console.error('[BugSpotter] Initialization failed. Captures disabled on this page:', err);
+});
 
 // Listen for messages from service worker / popup
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // If captures weren't initialized (domain not allowed), return empty data
+  if (!initialized && message.type === 'GET_CAPTURE_DATA') {
+    sendResponse({
+      type: 'CAPTURE_DATA',
+      data: { console: [], network: [], metadata: null },
+    });
+    return true;
+  }
+
   if (message.type === 'GET_CAPTURE_DATA') {
     sendResponse({
       type: 'CAPTURE_DATA',
       data: {
         console: getConsoleLogs(),
         network: getNetworkRequests(),
+        metadata: captureMetadata(sanitizer ?? undefined),
       },
     });
+    return true;
+  }
+
+  if (message.type === 'GET_REPLAY_EVENTS') {
+    sendResponse({
+      type: 'REPLAY_EVENTS',
+      data: getReplayEvents(),
+    });
+    return true;
+  }
+
+  if (message.type === 'START_REPLAY') {
+    startReplayRecording(60, sanitizer ?? undefined);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'STOP_REPLAY') {
+    stopReplayRecording();
+    sendResponse({ success: true });
     return true;
   }
 

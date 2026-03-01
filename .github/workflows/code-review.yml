@@ -1,0 +1,26 @@
+name: Gemini Code Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gemini AI Code Review
+        uses: petarzarkov/gemini-code-review-action@v1
+        with:
+          model: gemini-2.5-flash
+          enable_conversation_context: true
+          skip_draft_prs: true
+          language: English
+          exclude: '*.md,*.json,package-lock.json,pnpm-lock.yaml,*.yaml,*.test.ts,*.test.tsx,*.spec.ts,dist/*,playwright-report/*,test-results/*'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

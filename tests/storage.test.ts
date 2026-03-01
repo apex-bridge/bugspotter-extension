@@ -12,23 +12,34 @@ describe('storage/settings', () => {
   describe('getSettings', () => {
     it('returns defaults when no settings stored', async () => {
       const settings = await getSettings();
-      expect(settings).toEqual({ baseUrl: '', apiKey: '' });
+      expect(settings.baseUrl).toBe('');
+      expect(settings.apiKey).toBe('');
+      expect(settings.allowedDomains).toEqual([]);
+      expect(settings.sanitizationEnabled).toBe(true);
+      expect(settings.replayEnabled).toBe(false);
+      expect(settings.maxConsoleEntries).toBe(100);
+      expect(settings.maxNetworkEntries).toBe(50);
+      expect(settings.sanitizationPatterns).toContain('email');
     });
 
-    it('returns stored settings', async () => {
+    it('merges stored settings with defaults', async () => {
       await saveSettings({ baseUrl: 'https://bugs.example.com', apiKey: 'bgs_testkey123' });
       const settings = await getSettings();
       expect(settings.baseUrl).toBe('https://bugs.example.com');
       expect(settings.apiKey).toBe('bgs_testkey123');
+      // Defaults should still be present
+      expect(settings.sanitizationEnabled).toBe(true);
+      expect(settings.maxConsoleEntries).toBe(100);
     });
   });
 
   describe('saveSettings', () => {
-    it('calls chrome.storage.sync.set', async () => {
+    it('merges with existing settings', async () => {
       await saveSettings({ baseUrl: 'https://test.com', apiKey: 'bgs_key' });
-      expect(mockChrome.storage.sync.set).toHaveBeenCalledWith({
-        bugspotter_settings: { baseUrl: 'https://test.com', apiKey: 'bgs_key' },
-      });
+      await saveSettings({ replayEnabled: true });
+      const settings = await getSettings();
+      expect(settings.baseUrl).toBe('https://test.com');
+      expect(settings.replayEnabled).toBe(true);
     });
   });
 

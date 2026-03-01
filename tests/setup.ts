@@ -1,23 +1,34 @@
 import { vi } from 'vitest';
 
 // Mock chrome APIs
-const storageData: Record<string, unknown> = {};
+const syncData: Record<string, unknown> = {};
+const sessionData: Record<string, unknown> = {};
+const localData: Record<string, unknown> = {};
 
 const chrome = {
   storage: {
     sync: {
-      get: vi.fn((key: string) => Promise.resolve({ [key]: storageData[key] })),
+      get: vi.fn((key: string) => Promise.resolve({ [key]: syncData[key] })),
       set: vi.fn((items: Record<string, unknown>) => {
-        Object.assign(storageData, items);
+        Object.assign(syncData, items);
         return Promise.resolve();
       }),
     },
     session: {
-      get: vi.fn((key: string) => Promise.resolve({ [key]: storageData[`session_${key}`] })),
+      get: vi.fn((key: string) => Promise.resolve({ [key]: sessionData[key] })),
       set: vi.fn((items: Record<string, unknown>) => {
-        for (const [k, v] of Object.entries(items)) {
-          storageData[`session_${k}`] = v;
-        }
+        Object.assign(sessionData, items);
+        return Promise.resolve();
+      }),
+    },
+    local: {
+      get: vi.fn((key: string) => Promise.resolve({ [key]: localData[key] })),
+      set: vi.fn((items: Record<string, unknown>) => {
+        Object.assign(localData, items);
+        return Promise.resolve();
+      }),
+      remove: vi.fn((key: string) => {
+        delete localData[key];
         return Promise.resolve();
       }),
     },
@@ -35,6 +46,7 @@ const chrome = {
     onRemoved: {
       addListener: vi.fn(),
     },
+    sendMessage: vi.fn(() => Promise.resolve()),
   },
   action: {
     setBadgeBackgroundColor: vi.fn(),
@@ -43,11 +55,11 @@ const chrome = {
 
 vi.stubGlobal('chrome', chrome);
 
-// Helper to reset storage between tests
+// Helper to reset all storage between tests
 export function resetStorage() {
-  for (const key of Object.keys(storageData)) {
-    delete storageData[key];
-  }
+  for (const key of Object.keys(syncData)) delete syncData[key];
+  for (const key of Object.keys(sessionData)) delete sessionData[key];
+  for (const key of Object.keys(localData)) delete localData[key];
 }
 
 export { chrome as mockChrome };

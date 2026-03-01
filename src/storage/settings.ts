@@ -1,14 +1,31 @@
 import type { Settings } from '@/types';
+import { getAllPatternNames } from '@bugspotter/common';
 
 const SETTINGS_KEY = 'bugspotter_settings';
 
+const DEFAULT_SETTINGS: Settings = {
+  baseUrl: '',
+  apiKey: '',
+  allowedDomains: [],
+  sanitizationEnabled: true,
+  sanitizationPatterns: getAllPatternNames(),
+  replayEnabled: false,
+  maxConsoleEntries: 100,
+  maxNetworkEntries: 50,
+};
+
 export async function getSettings(): Promise<Settings> {
   const result = await chrome.storage.sync.get(SETTINGS_KEY);
-  return result[SETTINGS_KEY] ?? { baseUrl: '', apiKey: '' };
+  const stored = result[SETTINGS_KEY];
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}),
+  };
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+export async function saveSettings(settings: Partial<Settings>): Promise<void> {
+  const current = await getSettings();
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: { ...current, ...settings } });
 }
 
 export async function getSessionData<T>(key: string): Promise<T | null> {

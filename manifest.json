@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BugSpotter",
-  "version": "1.0.0",
-  "description": "Capture bug reports and submit them to BugSpotter",
+  "version": "1.2.0",
+  "description": "Capture bug reports with session replay, PII sanitization, and offline support",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "action": {
@@ -28,6 +28,12 @@
     "page": "src/options/options.html",
     "open_in_tab": true
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["main-world-capture.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "icons": {
     "16": "public/icons/icon-16.png",
     "48": "public/icons/icon-48.png",

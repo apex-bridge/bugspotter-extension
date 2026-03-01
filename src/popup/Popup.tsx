@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ProjectSelector } from './components/ProjectSelector';
 import { BugReportForm } from './components/BugReportForm';
 import { SubmitButton } from './components/SubmitButton';
 import type { BrowserMetadata } from '@/types';
@@ -8,7 +7,6 @@ import { getSettings } from '@/storage/settings';
 type SubmitStatus = 'idle' | 'loading' | 'success' | 'error';
 
 export function Popup() {
-  const [projectId, setProjectId] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium');
@@ -16,11 +14,31 @@ export function Popup() {
   const [status, setStatus] = useState<SubmitStatus>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [configured, setConfigured] = useState(true);
+  const [replayEnabled, setReplayEnabled] = useState(false);
+  const [offlineCount, setOfflineCount] = useState(0);
 
   useEffect(() => {
     getSettings().then((s) => {
       if (!s.baseUrl || !s.apiKey) setConfigured(false);
+      setReplayEnabled(s.replayEnabled);
     });
+
+    // Retrieve any pending annotated screenshot (stored by service worker
+    // while popup was closed during annotation)
+    chrome.runtime
+      .sendMessage({ type: 'GET_PENDING_SCREENSHOT' })
+      .then((res) => {
+        if (res?.data) setScreenshot(res.data);
+      })
+      .catch(() => {});
+
+    // Check offline queue size
+    chrome.runtime
+      .sendMessage({ type: 'GET_OFFLINE_QUEUE_SIZE' })
+      .then((res) => {
+        if (typeof res?.size === 'number') setOfflineCount(res.size);
+      })
+      .catch(() => {});
   }, []);
 
   const handleCapture = useCallback(async () => {
@@ -44,7 +62,7 @@ export function Popup() {
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!title.trim() || !projectId) return;
+    if (!title.trim()) return;
 
     setStatus('loading');
     setErrorMsg('');
@@ -53,19 +71,52 @@ export function Popup() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const tabId = tab?.id;
 
-      // Get capture data from service worker
-      const captureData = await chrome.runtime.sendMessage({ type: 'GET_CAPTURE_DATA', tabId });
+      // Get capture data + metadata directly from content script (not service worker,
+      // whose in-memory store is lost when MV3 suspends it).
+      // Metadata is collected in the page context so viewport reflects the actual page.
+      let captureData: {
+        data?: { console?: unknown[]; network?: unknown[]; metadata?: BrowserMetadata | null };
+      } = {};
+      if (tabId) {
+        try {
+          captureData = await chrome.tabs.sendMessage(tabId, { type: 'GET_CAPTURE_DATA' });
+        } catch {
+          // Content script not available (e.g. chrome:// pages)
+        }
+      }
 
-      const metadata: BrowserMetadata = {
+      // Get replay events if enabled
+      let replayEvents: unknown[] = [];
+      if (replayEnabled && tabId) {
+        try {
+          const replayResponse = await chrome.tabs.sendMessage(tabId, {
+            type: 'GET_REPLAY_EVENTS',
+          });
+          replayEvents = replayResponse?.data ?? [];
+        } catch {
+          // Replay not available
+        }
+      }
+
+      // Use metadata from content script (page context); fall back to minimal popup metadata
+      const metadata: BrowserMetadata = captureData?.data?.metadata ?? {
         userAgent: navigator.userAgent,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
+        viewport: {
+          width: window.innerWidth || screen.width,
+          height: window.innerHeight || screen.height,
+        },
         url: tab?.url ?? '',
         timestamp: Date.now(),
         platform: navigator.platform,
         language: navigator.language,
         screen: { width: screen.width, height: screen.height },
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        browser: 'Unknown',
+        os: 'Unknown',
+        version: '',
       };
+      // Always set version from the extension manifest (not available in content scripts)
+      metadata.version = chrome.runtime.getManifest().version;
 
       const response = await chrome.runtime.sendMessage({
         type: 'SUBMIT_REPORT',
@@ -73,15 +124,15 @@ export function Popup() {
           title,
           description,
           priority,
-          project_id: projectId,
           report: {
             console: captureData?.data?.console ?? [],
             network: captureData?.data?.network ?? [],
             metadata,
           },
           hasScreenshot: !!screenshot,
-          hasReplay: false,
+          hasReplay: replayEvents.length > 0,
           screenshotDataUrl: screenshot ?? '',
+          replayEvents,
         },
       });
 
@@ -95,7 +146,7 @@ export function Popup() {
       setStatus('error');
       setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
     }
-  }, [title, description, priority, projectId, screenshot]);
+  }, [title, description, priority, screenshot, replayEnabled]);
 
   // Listen for annotation results
   useEffect(() => {
@@ -147,9 +198,19 @@ export function Popup() {
 
   return (
     <div className="w-80 p-4 bg-gray-900 text-white">
-      <h1 className="text-lg font-bold mb-3">BugSpotter</h1>
-
-      <ProjectSelector value={projectId} onChange={setProjectId} />
+      <div className="flex items-center justify-between mb-3">
+        <h1 className="text-lg font-bold">BugSpotter</h1>
+        <div className="flex items-center gap-2">
+          {replayEnabled && (
+            <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded">REC</span>
+          )}
+          {offlineCount > 0 && (
+            <span className="text-xs bg-yellow-600 text-white px-1.5 py-0.5 rounded">
+              {offlineCount} queued
+            </span>
+          )}
+        </div>
+      </div>
 
       <BugReportForm
         title={title}
@@ -176,7 +237,7 @@ export function Popup() {
 
       {errorMsg && <p className="mt-2 text-red-400 text-xs">{errorMsg}</p>}
 
-      <SubmitButton status={status} disabled={!title.trim() || !projectId} onClick={handleSubmit} />
+      <SubmitButton status={status} disabled={!title.trim()} onClick={handleSubmit} />
     </div>
   );
 }
