@@ -248,7 +248,9 @@ export function Options() {
                         onChange={() => togglePattern(pattern)}
                         className="accent-blue-500"
                       />
-                      <span className="text-xs text-gray-300">{PATTERN_LABELS[pattern]}</span>
+                      <span className="text-xs text-gray-300">
+                        {PATTERN_LABELS[pattern] ?? pattern}
+                      </span>
                     </label>
                   ))}
                 </div>

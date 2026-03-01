@@ -61,6 +61,22 @@ function truncStr(val: unknown, max: number): string {
   return val.length > max ? val.slice(0, max) : val;
 }
 
+const MAX_ARG_LENGTH = 4000;
+
+function capArg(arg: unknown): unknown {
+  if (typeof arg === 'string')
+    return arg.length > MAX_ARG_LENGTH ? arg.slice(0, MAX_ARG_LENGTH) : arg;
+  if (arg === null || arg === undefined || typeof arg !== 'object') return arg;
+  // Cap serialized size of object args
+  try {
+    const json = JSON.stringify(arg);
+    if (json.length > MAX_ARG_LENGTH) return json.slice(0, MAX_ARG_LENGTH);
+    return arg;
+  } catch {
+    return String(arg);
+  }
+}
+
 function validateConsoleEntry(data: unknown): ConsoleEntry | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
@@ -71,9 +87,26 @@ function validateConsoleEntry(data: unknown): ConsoleEntry | null {
     level: d.level as ConsoleEntry['level'],
     message: truncStr(d.message, MAX_MESSAGE_LENGTH),
     timestamp: d.timestamp,
-    args: Array.isArray(d.args) ? d.args.slice(0, 20) : [],
+    args: Array.isArray(d.args) ? d.args.slice(0, 20).map(capArg) : [],
     ...(typeof d.stack === 'string' ? { stack: truncStr(d.stack, MAX_STACK_LENGTH) } : {}),
   };
+}
+
+const MAX_HEADERS = 50;
+const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function sanitizeHeaders(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null) return {};
+  const entries = Object.entries(raw as Record<string, unknown>);
+  const result: Record<string, string> = {};
+  let count = 0;
+  for (const [key, val] of entries) {
+    if (count >= MAX_HEADERS) break;
+    if (BLOCKED_KEYS.has(key)) continue;
+    result[key] = typeof val === 'string' ? val.slice(0, 1000) : String(val).slice(0, 1000);
+    count++;
+  }
+  return result;
 }
 
 function validateNetworkEntry(data: unknown): NetworkEntry | null {
@@ -87,10 +120,7 @@ function validateNetworkEntry(data: unknown): NetworkEntry | null {
     statusText: typeof d.statusText === 'string' ? d.statusText.slice(0, 100) : '',
     duration: typeof d.duration === 'number' ? d.duration : 0,
     timestamp: d.timestamp,
-    headers:
-      typeof d.headers === 'object' && d.headers !== null
-        ? (d.headers as Record<string, string>)
-        : {},
+    headers: sanitizeHeaders(d.headers),
     ...(typeof d.requestBody === 'string'
       ? { requestBody: truncStr(d.requestBody, MAX_BODY_LENGTH) }
       : {}),
@@ -194,7 +224,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'START_REPLAY') {
-    startReplayRecording();
+    startReplayRecording(60, sanitizer ?? undefined);
     sendResponse({ success: true });
     return true;
   }

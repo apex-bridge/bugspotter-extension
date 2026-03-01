@@ -83,13 +83,13 @@ test.describe('Content Script Injection', () => {
 
   test('does not inject on chrome:// pages', async ({ context }) => {
     const page = await context.newPage();
-    // Navigate to a chrome internal page — content scripts don't run here
-    await page.goto('chrome://version');
-    await page.waitForTimeout(500);
 
-    // No errors should have occurred
+    // Attach listener before navigation to catch errors during page load
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
+
+    // Navigate to a chrome internal page — content scripts don't run here
+    await page.goto('chrome://version');
     await page.waitForTimeout(500);
 
     // No BugSpotter-related errors
