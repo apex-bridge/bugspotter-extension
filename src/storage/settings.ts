@@ -16,7 +16,11 @@ const DEFAULT_SETTINGS: Settings = {
 
 export async function getSettings(): Promise<Settings> {
   const result = await chrome.storage.sync.get(SETTINGS_KEY);
-  return { ...DEFAULT_SETTINGS, ...result[SETTINGS_KEY] };
+  const stored = result[SETTINGS_KEY];
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}),
+  };
 }
 
 export async function saveSettings(settings: Partial<Settings>): Promise<void> {

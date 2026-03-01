@@ -53,6 +53,9 @@ export async function createReport(payload: BugReportPayload): Promise<CreateRep
 }
 
 export async function uploadScreenshot(uploadUrl: string, pngBlob: Blob): Promise<void> {
+  if (!isSecureEndpoint(uploadUrl)) {
+    throw new Error('Screenshot upload requires HTTPS. Insecure endpoints are not allowed.');
+  }
   const response = await retryWithBackoff(() =>
     fetch(uploadUrl, {
       method: 'PUT',
@@ -66,6 +69,9 @@ export async function uploadScreenshot(uploadUrl: string, pngBlob: Blob): Promis
 }
 
 export async function uploadReplay(uploadUrl: string, gzipBlob: Blob): Promise<void> {
+  if (!isSecureEndpoint(uploadUrl)) {
+    throw new Error('Replay upload requires HTTPS. Insecure endpoints are not allowed.');
+  }
   const response = await retryWithBackoff(() =>
     fetch(uploadUrl, {
       method: 'PUT',

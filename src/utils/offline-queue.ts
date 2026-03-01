@@ -54,7 +54,8 @@ function generateId(): string {
 async function getQueue(): Promise<QueuedRequest[]> {
   try {
     const result = await chrome.storage.local.get(QUEUE_KEY);
-    return result[QUEUE_KEY] ?? [];
+    const stored = result[QUEUE_KEY];
+    return Array.isArray(stored) ? stored : [];
   } catch {
     return [];
   }

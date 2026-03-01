@@ -7,6 +7,7 @@ import {
   type PIIPatternName,
 } from '@bugspotter/common';
 import type { ConsoleEntry, NetworkEntry } from '@/types';
+import { getSettings } from '@/storage/settings';
 
 // -- Buffers in the isolated world (populated via postMessage from main world) --
 let consoleBuffer: CircularBuffer<ConsoleEntry>;
@@ -122,20 +123,17 @@ function listenForMainWorldCaptures() {
 
 // Load settings and initialize
 async function init() {
-  const result = await chrome.storage.sync.get('bugspotter_settings');
-  const settings = result.bugspotter_settings ?? {};
+  const settings = await getSettings();
 
-  const allowedDomains = (settings.allowedDomains as string[]) ?? [];
-  if (!isDomainAllowed(allowedDomains)) return;
+  if (!isDomainAllowed(settings.allowedDomains)) return;
 
-  const sanitizationEnabled = settings.sanitizationEnabled ?? true;
   const sanitizationPatterns = settings.sanitizationPatterns as PIIPatternName[] | undefined;
-  const maxConsoleEntries = (settings.maxConsoleEntries as number) ?? 100;
-  const maxNetworkEntries = (settings.maxNetworkEntries as number) ?? 50;
-  const replayEnabled = (settings.replayEnabled as boolean) ?? false;
+  const maxConsoleEntries = settings.maxConsoleEntries;
+  const maxNetworkEntries = settings.maxNetworkEntries;
+  const replayEnabled = settings.replayEnabled;
 
   sanitizer = createSanitizer({
-    enabled: sanitizationEnabled,
+    enabled: settings.sanitizationEnabled,
     patterns: sanitizationPatterns,
   });
 
@@ -158,12 +156,10 @@ async function init() {
 }
 
 init().catch((err) => {
-  console.error('[BugSpotter] Init failed, falling back to defaults:', err);
-  consoleBuffer = new CircularBuffer<ConsoleEntry>(100);
-  networkBuffer = new CircularBuffer<NetworkEntry>(50);
-  initialized = true;
-  listenForMainWorldCaptures();
-  injectMainWorldCaptures();
+  // Do not start captures on init failure — sanitizer and domain allowlist
+  // would be uninitialized, risking unsanitized PII capture on all pages.
+  // The `initialized` flag stays false, so GET_CAPTURE_DATA returns empty data.
+  console.error('[BugSpotter] Initialization failed. Captures disabled on this page:', err);
 });
 
 // Listen for messages from service worker / popup
