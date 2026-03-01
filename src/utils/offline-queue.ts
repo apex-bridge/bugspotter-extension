@@ -72,7 +72,14 @@ async function saveQueue(queue: QueuedRequest[]): Promise<void> {
         await chrome.storage.local.set({ [QUEUE_KEY]: trimmed });
       } catch {
         // Still failing — clear everything
-        await chrome.storage.local.remove(QUEUE_KEY);
+        try {
+          await chrome.storage.local.remove(QUEUE_KEY);
+        } catch (removeError) {
+          console.error(
+            '[BugSpotter] Failed to clear offline queue after quota errors:',
+            removeError,
+          );
+        }
       }
     } else {
       // Non-quota error: log so callers are aware persistence failed

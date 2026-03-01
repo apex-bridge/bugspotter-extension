@@ -143,12 +143,21 @@
   /* ---- XHR capture ---- */
   var OX = XMLHttpRequest.prototype.open;
   var OS = XMLHttpRequest.prototype.send;
+  var OSH = XMLHttpRequest.prototype.setRequestHeader;
 
   XMLHttpRequest.prototype.open = function (m, u) {
     this._bs_method = (m || 'GET').toUpperCase();
-    this._bs_url = u;
+    this._bs_url = String(u);
     this._bs_start = Date.now();
+    this._bs_headers = {};
     return OX.apply(this, arguments);
+  };
+
+  XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+    if (this._bs_headers) {
+      this._bs_headers[name] = value;
+    }
+    return OSH.apply(this, arguments);
   };
 
   XMLHttpRequest.prototype.send = function (body) {
@@ -164,7 +173,7 @@
         statusText: '',
         duration: Date.now() - (xhr._bs_start || Date.now()),
         timestamp: xhr._bs_start || Date.now(),
-        headers: {},
+        headers: xhr._bs_headers || {},
         requestBody: xhr._bs_body || '',
         error: 'XHR error',
       };
@@ -184,7 +193,7 @@
         statusText: xhr.statusText || '',
         duration: Date.now() - (xhr._bs_start || Date.now()),
         timestamp: xhr._bs_start || Date.now(),
-        headers: {},
+        headers: xhr._bs_headers || {},
         requestBody: xhr._bs_body || '',
       };
       try {

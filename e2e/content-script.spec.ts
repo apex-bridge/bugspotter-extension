@@ -13,7 +13,10 @@ test.describe('Content Script Injection', () => {
 
     // Reload to trigger a fresh content script injection
     await page.reload();
-    await page.waitForTimeout(1000);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await page.waitForFunction(() => (window as any).__bugspotter_injected, null, {
+      timeout: 5000,
+    });
 
     // No CSP violations should be present
     const cspErrors = errors.filter(
