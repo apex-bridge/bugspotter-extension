@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Gemini AI Code Review
-        uses: petarzarkov/gemini-code-review-action@latest
+        uses: petarzarkov/gemini-code-review-action@v1
         with:
           model: gemini-2.5-flash
           enable_conversation_context: true

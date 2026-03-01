@@ -29,19 +29,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  // Store annotated screenshot in session storage so it survives service worker restarts
+  // Store annotated screenshot in local storage (session storage quota is too small
+  // for base64 screenshot data URLs which can exceed 1MB)
   if (message.type === 'ANNOTATION_DONE' && message.data) {
-    chrome.storage.session.set({ [PENDING_SCREENSHOT_KEY]: message.data }).catch(() => {});
+    chrome.storage.local
+      .set({ [PENDING_SCREENSHOT_KEY]: message.data })
+      .catch((err) => console.error('[BugSpotter] Failed to store screenshot:', err));
     return false;
   }
 
   // Popup asks if there's a pending annotated screenshot (after reopening)
   if (message.type === 'GET_PENDING_SCREENSHOT') {
-    chrome.storage.session
+    chrome.storage.local
       .get(PENDING_SCREENSHOT_KEY)
       .then((result) => {
         const data = result[PENDING_SCREENSHOT_KEY] ?? null;
-        if (data) chrome.storage.session.remove(PENDING_SCREENSHOT_KEY).catch(() => {});
+        if (data) chrome.storage.local.remove(PENDING_SCREENSHOT_KEY).catch(() => {});
         sendResponse({ data });
       })
       .catch(() => {
@@ -95,12 +98,19 @@ async function handleSubmit(
       await confirmUpload(result.data.id, 'screenshot');
     }
 
-    // Step 3: Upload replay if present
+    // Step 3: Upload replay if present (non-fatal — report already created)
     if (replayEvents && replayEvents.length > 0 && result.data.presignedUrls?.replay) {
-      const replayJson = JSON.stringify(replayEvents);
-      const compressed = await gzipCompress(replayJson);
-      await uploadReplay(result.data.presignedUrls.replay.uploadUrl, compressed);
-      await confirmUpload(result.data.id, 'replay');
+      try {
+        const replayJson = JSON.stringify(replayEvents);
+        const compressed = await gzipCompress(replayJson);
+        await uploadReplay(result.data.presignedUrls.replay.uploadUrl, compressed);
+        await confirmUpload(result.data.id, 'replay');
+      } catch (replayErr) {
+        console.error(
+          '[BugSpotter] Replay upload failed, report submitted without replay:',
+          replayErr,
+        );
+      }
     }
 
     succeeded = true;
@@ -130,7 +140,10 @@ async function handleSubmit(
     if (succeeded) {
       deduplicator.markComplete(payload.title, payload.description);
     } else {
-      // Don't mark complete on failure — allows immediate retry
+      // Don't mark complete on failure — allows immediate retry.
+      // TODO: clear() wipes ALL dedup entries, not just the failed one. Add a
+      // per-entry removeInProgress() method to @bugspotter/common to avoid
+      // inadvertently allowing duplicates of other recent reports.
       deduplicator.clear();
     }
   }
@@ -148,6 +161,9 @@ function isNetworkError(error: unknown): boolean {
 }
 
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  if (!dataUrl.startsWith('data:image/')) {
+    throw new Error('Invalid screenshot data URL');
+  }
   const response = await fetch(dataUrl);
   return response.blob();
 }

@@ -36,11 +36,6 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 export async function fetchProjects(): Promise<Project[]> {
-  const settings = await getSettings();
-  if (!settings.baseUrl || !settings.apiKey) {
-    throw new Error('BugSpotter URL and API key must be configured in extension options.');
-  }
-
   try {
     const result = await apiRequest<{ success: boolean; data: Project[] }>('/api/v1/projects');
     return result.data;

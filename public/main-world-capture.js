@@ -78,8 +78,18 @@
   /* ---- Fetch capture ---- */
   var OF = window.fetch;
   window.fetch = function (input, init) {
-    var url = typeof input === 'string' ? input : input && input.url ? input.url : '';
-    var method = init && init.method ? init.method.toUpperCase() : 'GET';
+    // Handle string, URL, and Request inputs
+    var url = '';
+    if (typeof input === 'string') {
+      url = input;
+    } else if (input && typeof input === 'object') {
+      url = typeof input.href === 'string' ? input.href : (input.url || '');
+    }
+    var method = (init && init.method)
+      ? init.method.toUpperCase()
+      : (input && typeof input === 'object' && input.method)
+        ? input.method.toUpperCase()
+        : 'GET';
     var start = Date.now();
     var body = init && init.body ? String(init.body).slice(0, 2048) : '';
 

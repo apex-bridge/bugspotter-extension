@@ -27,10 +27,9 @@ describe('api/bugspotter-client', () => {
   }
 
   describe('fetchProjects', () => {
-    it('throws when settings not configured', async () => {
-      await expect(fetchProjects()).rejects.toThrow(
-        'BugSpotter URL and API key must be configured',
-      );
+    it('returns fallback when settings not configured', async () => {
+      const result = await fetchProjects();
+      expect(result).toEqual([{ id: 'api-key-project', name: 'API Key Project' }]);
     });
 
     it('fetches projects with correct headers', async () => {

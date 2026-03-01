@@ -101,7 +101,10 @@ export function Popup() {
       // Use metadata from content script (page context); fall back to minimal popup metadata
       const metadata: BrowserMetadata = captureData?.data?.metadata ?? {
         userAgent: navigator.userAgent,
-        viewport: { width: 0, height: 0 },
+        viewport: {
+          width: window.innerWidth || screen.width,
+          height: window.innerHeight || screen.height,
+        },
         url: tab?.url ?? '',
         timestamp: Date.now(),
         platform: navigator.platform,
