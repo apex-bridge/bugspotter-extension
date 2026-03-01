@@ -162,8 +162,12 @@ export class OfflineQueue {
         } else if (retryableStatusCodes.includes(response.status)) {
           request.attempts++;
           remaining.push(request);
+        } else {
+          console.warn('[BugSpotter] Dropping non-retryable queued request:', {
+            endpoint: request.endpoint,
+            status: response.status,
+          });
         }
-        // Non-retryable errors are silently dropped
       } catch {
         // Network error — keep for next retry
         request.attempts++;

@@ -95,14 +95,18 @@ function validateConsoleEntry(data: unknown): ConsoleEntry | null {
 const MAX_HEADERS = 50;
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+const MAX_HEADER_KEY_LENGTH = 200;
+
 function sanitizeHeaders(raw: unknown): Record<string, string> {
   if (typeof raw !== 'object' || raw === null) return {};
   const entries = Object.entries(raw as Record<string, unknown>);
   const result: Record<string, string> = {};
   let count = 0;
-  for (const [key, val] of entries) {
+  for (const [rawKey, val] of entries) {
     if (count >= MAX_HEADERS) break;
-    if (BLOCKED_KEYS.has(key)) continue;
+    if (BLOCKED_KEYS.has(rawKey)) continue;
+    const key =
+      rawKey.length > MAX_HEADER_KEY_LENGTH ? rawKey.slice(0, MAX_HEADER_KEY_LENGTH) : rawKey;
     result[key] = typeof val === 'string' ? val.slice(0, 1000) : String(val).slice(0, 1000);
     count++;
   }

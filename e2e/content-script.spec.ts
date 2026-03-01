@@ -40,10 +40,8 @@ test.describe('Content Script Injection', () => {
       console.log('bugspotter-e2e-test-message');
     });
 
-    await page.waitForTimeout(300);
-
     // The patched console.log should still relay messages to the devtools console
-    expect(messages).toContain('bugspotter-e2e-test-message');
+    await expect.poll(() => messages).toContain('bugspotter-e2e-test-message');
   });
 
   test('captures fetch network requests', async ({ context }) => {

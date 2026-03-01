@@ -96,5 +96,5 @@ export function clearReplayBuffer(): void {
 }
 
 export function isRecording(): boolean {
-  return stopFn !== null;
+  return stopFn !== null || pendingAbort !== null;
 }
