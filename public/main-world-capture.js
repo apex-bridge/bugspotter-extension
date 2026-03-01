@@ -91,7 +91,13 @@
         ? input.method.toUpperCase()
         : 'GET';
     var start = Date.now();
-    var body = init && init.body ? String(init.body).slice(0, 2048) : '';
+    var body = (init && typeof init.body === 'string') ? init.body.slice(0, 2048) : '';
+    var reqHeaders = {};
+    try {
+      if (init && init.headers) {
+        reqHeaders = Object.fromEntries(new Headers(init.headers).entries());
+      }
+    } catch (e) { /* ignore unparseable headers */ }
 
     return OF.apply(this, arguments).then(
       function (response) {
@@ -102,7 +108,7 @@
           statusText: response.statusText || '',
           duration: Date.now() - start,
           timestamp: start,
-          headers: {},
+          headers: reqHeaders,
           requestBody: body,
         };
         try {
@@ -120,7 +126,7 @@
           statusText: '',
           duration: Date.now() - start,
           timestamp: start,
-          headers: {},
+          headers: reqHeaders,
           requestBody: body,
           error: err.message || 'Network error',
         };
@@ -147,7 +153,7 @@
 
   XMLHttpRequest.prototype.send = function (body) {
     var xhr = this;
-    xhr._bs_body = body ? String(body).slice(0, 2048) : '';
+    xhr._bs_body = (typeof body === 'string') ? body.slice(0, 2048) : '';
 
     xhr.addEventListener('error', function () {
       xhr._bs_errored = true;

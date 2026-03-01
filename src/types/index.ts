@@ -97,8 +97,6 @@ export type MessageType =
       type: 'CAPTURE_DATA';
       data: { console: ConsoleEntry[]; network: NetworkEntry[]; metadata: BrowserMetadata | null };
     }
-  | { type: 'CONSOLE_ENTRY'; data: ConsoleEntry }
-  | { type: 'NETWORK_ENTRY'; data: NetworkEntry }
   | { type: 'START_ANNOTATION'; screenshot: string }
   | { type: 'ANNOTATION_DONE'; data: string }
   | { type: 'ANNOTATION_CANCEL' }

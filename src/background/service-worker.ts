@@ -127,10 +127,14 @@ async function handleSubmit(
         const endpoint = `${baseUrl.replace(/\/$/, '')}/api/v1/reports`;
         if (isSecureEndpoint(endpoint)) {
           const offlinePayload = { ...payload, hasScreenshot: false, hasReplay: false };
-          await offlineQueue.enqueue(endpoint, JSON.stringify(offlinePayload), {
-            'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
-          });
+          try {
+            await offlineQueue.enqueue(endpoint, JSON.stringify(offlinePayload), {
+              'Content-Type': 'application/json',
+              'X-API-Key': apiKey,
+            });
+          } catch (enqueueErr) {
+            console.error('[BugSpotter] Failed to enqueue for offline retry:', enqueueErr);
+          }
         }
       }
     }
@@ -141,10 +145,9 @@ async function handleSubmit(
       deduplicator.markComplete(payload.title, payload.description);
     } else {
       // Don't mark complete on failure — allows immediate retry.
-      // TODO: clear() wipes ALL dedup entries, not just the failed one. Add a
-      // per-entry removeInProgress() method to @bugspotter/common to avoid
-      // inadvertently allowing duplicates of other recent reports.
-      deduplicator.clear();
+      // Only remove this entry's in-progress flag, preserving dedup protection
+      // for other recent reports.
+      deduplicator.removeInProgress(payload.title, payload.description);
     }
   }
 }

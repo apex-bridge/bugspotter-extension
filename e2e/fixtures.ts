@@ -79,7 +79,8 @@ export async function openTestPage(context: BrowserContext, url = 'https://examp
   const page = await context.newPage();
   await page.goto(url);
   await page.waitForLoadState('domcontentloaded');
-  // Give the content script a moment to initialize
-  await page.waitForTimeout(500);
+  // Wait for the main-world capture script's injection flag
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.waitForFunction(() => (window as any).__bugspotter_injected, null, { timeout: 5000 });
   return page;
 }
