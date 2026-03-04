@@ -19,12 +19,15 @@ Chrome extension (Manifest V3) for capturing bug reports and submitting them to 
 
 ## Installation
 
-### From GitHub Releases (recommended)
+### Quick Install
 
-1. Download the latest `bugspotter-extension-v*.zip` from [Releases](../../releases)
-2. Open `chrome://extensions` in Chrome
-3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** and select the unzipped folder
+1. **[Download latest release](https://github.com/apexbridge-tech/bugspotter-extension/releases/latest)** — grab the `bugspotter-extension-v*.zip` file
+2. Unzip the downloaded file
+3. Open `chrome://extensions` in Chrome
+4. Enable **Developer mode** (top-right toggle)
+5. Click **Load unpacked** and select the unzipped folder
+
+To update: download the new zip, unzip it to the same folder (overwrite), and click the reload icon on the extension card in `chrome://extensions`.
 
 ### From Source
 
