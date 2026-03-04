@@ -238,6 +238,10 @@ export function Popup() {
       {errorMsg && <p className="mt-2 text-red-400 text-xs">{errorMsg}</p>}
 
       <SubmitButton status={status} disabled={!title.trim()} onClick={handleSubmit} />
+
+      <p className="mt-3 text-center text-[10px] text-gray-600">
+        v{chrome.runtime.getManifest().version} &middot; BugSpotter
+      </p>
     </div>
   );
 }
