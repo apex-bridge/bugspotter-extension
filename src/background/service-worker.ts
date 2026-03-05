@@ -77,6 +77,14 @@ async function handleSubmit(
 ) {
   const { screenshotDataUrl, replayEvents, ...payload } = data;
 
+  console.warn('[BugSpotter] handleSubmit called:', {
+    consoleCount: payload.report?.console?.length ?? 0,
+    networkCount: payload.report?.network?.length ?? 0,
+    hasScreenshot: payload.hasScreenshot,
+    hasReplay: payload.hasReplay,
+    replayEventsCount: replayEvents?.length ?? 0,
+  });
+
   // Deduplication check
   if (deduplicator.isDuplicate(payload.title, payload.description)) {
     throw new Error('Duplicate report detected. Please wait before resubmitting.');
@@ -89,6 +97,12 @@ async function handleSubmit(
     // Step 1: Create report (retry is handled inside the API client)
     const result = await createReport(payload);
 
+    console.warn('[BugSpotter] createReport response:', {
+      bugId: result.data.id,
+      hasScreenshotUrl: !!result.data.presignedUrls?.screenshot,
+      hasReplayUrl: !!result.data.presignedUrls?.replay,
+    });
+
     // Step 2: Upload screenshot if present
     // Note: compressImage requires DOM APIs (canvas, Image) unavailable in MV3
     // service workers. Screenshot is uploaded as the original PNG from captureVisibleTab.
@@ -99,6 +113,15 @@ async function handleSubmit(
     }
 
     // Step 3: Upload replay if present (non-fatal — report already created)
+    if (!(replayEvents && replayEvents.length > 0)) {
+      console.warn('[BugSpotter] Replay upload SKIPPED: no replay events');
+    } else if (!result.data.presignedUrls?.replay) {
+      console.warn(
+        '[BugSpotter] Replay upload SKIPPED: server returned no presigned URL (hasReplay was',
+        payload.hasReplay,
+        ')',
+      );
+    }
     if (replayEvents && replayEvents.length > 0 && result.data.presignedUrls?.replay) {
       try {
         const replayJson = JSON.stringify(replayEvents);

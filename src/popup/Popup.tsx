@@ -6,6 +6,15 @@ import { getSettings } from '@/storage/settings';
 
 type SubmitStatus = 'idle' | 'loading' | 'success' | 'error';
 
+interface Diagnostics {
+  initialized: boolean;
+  consoleCount: number;
+  networkCount: number;
+  replayCount: number;
+  replayRecording: boolean;
+  error?: string;
+}
+
 export function Popup() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -16,6 +25,7 @@ export function Popup() {
   const [configured, setConfigured] = useState(true);
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [offlineCount, setOfflineCount] = useState(0);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -37,6 +47,48 @@ export function Popup() {
       .sendMessage({ type: 'GET_OFFLINE_QUEUE_SIZE' })
       .then((res) => {
         if (typeof res?.size === 'number') setOfflineCount(res.size);
+      })
+      .catch(() => {});
+
+    // Probe content script for diagnostics
+    chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(([tab]) => {
+        if (!tab?.id) {
+          setDiagnostics({
+            initialized: false,
+            consoleCount: 0,
+            networkCount: 0,
+            replayCount: 0,
+            replayRecording: false,
+            error: 'No active tab',
+          });
+          return;
+        }
+        chrome.tabs
+          .sendMessage(tab.id, { type: 'GET_DIAGNOSTICS' })
+          .then((res) => {
+            if (res?.data) setDiagnostics(res.data);
+            else
+              setDiagnostics({
+                initialized: false,
+                consoleCount: 0,
+                networkCount: 0,
+                replayCount: 0,
+                replayRecording: false,
+                error: 'Empty response',
+              });
+          })
+          .catch((err) => {
+            setDiagnostics({
+              initialized: false,
+              consoleCount: 0,
+              networkCount: 0,
+              replayCount: 0,
+              replayRecording: false,
+              error: err.message || 'Content script unavailable',
+            });
+          });
       })
       .catch(() => {});
   }, []);
@@ -118,22 +170,34 @@ export function Popup() {
       // Always set version from the extension manifest (not available in content scripts)
       metadata.version = chrome.runtime.getManifest().version;
 
+      const submitPayload = {
+        title,
+        description,
+        priority,
+        report: {
+          console: captureData?.data?.console ?? [],
+          network: captureData?.data?.network ?? [],
+          metadata,
+        },
+        hasScreenshot: !!screenshot,
+        hasReplay: replayEvents.length > 0,
+        screenshotDataUrl: screenshot ?? '',
+        replayEvents,
+      };
+
+      console.warn('[BugSpotter] Submitting report payload:', {
+        consoleCount: submitPayload.report.console.length,
+        networkCount: submitPayload.report.network.length,
+        hasScreenshot: submitPayload.hasScreenshot,
+        hasReplay: submitPayload.hasReplay,
+        replayEventsCount: submitPayload.replayEvents.length,
+        metadataUrl: submitPayload.report.metadata.url,
+        captureDataReceived: !!captureData?.data,
+      });
+
       const response = await chrome.runtime.sendMessage({
         type: 'SUBMIT_REPORT',
-        data: {
-          title,
-          description,
-          priority,
-          report: {
-            console: captureData?.data?.console ?? [],
-            network: captureData?.data?.network ?? [],
-            metadata,
-          },
-          hasScreenshot: !!screenshot,
-          hasReplay: replayEvents.length > 0,
-          screenshotDataUrl: screenshot ?? '',
-          replayEvents,
-        },
+        data: submitPayload,
       });
 
       if (response.success) {
@@ -199,7 +263,12 @@ export function Popup() {
   return (
     <div className="w-80 p-4 bg-gray-900 text-white">
       <div className="flex items-center justify-between mb-3">
-        <h1 className="text-lg font-bold">BugSpotter</h1>
+        <h1 className="text-lg font-bold">
+          BugSpotter{' '}
+          <span className="text-xs font-normal text-gray-400">
+            v{chrome.runtime.getManifest().version}
+          </span>
+        </h1>
         <div className="flex items-center gap-2">
           {replayEnabled && (
             <span className="text-xs bg-red-600 text-white px-1.5 py-0.5 rounded">REC</span>
@@ -211,6 +280,26 @@ export function Popup() {
           )}
         </div>
       </div>
+
+      {diagnostics && (
+        <div className="mb-2 px-2 py-1 bg-gray-800 rounded text-[10px] font-mono flex flex-wrap gap-x-3 gap-y-0.5">
+          <span className={diagnostics.initialized ? 'text-green-400' : 'text-red-400'}>
+            Content: {diagnostics.initialized ? 'OK' : 'NOT INIT'}
+          </span>
+          <span className={diagnostics.consoleCount > 0 ? 'text-green-400' : 'text-yellow-400'}>
+            Console: {diagnostics.consoleCount}
+          </span>
+          <span className={diagnostics.networkCount > 0 ? 'text-green-400' : 'text-yellow-400'}>
+            Network: {diagnostics.networkCount}
+          </span>
+          {replayEnabled && (
+            <span className={diagnostics.replayCount > 0 ? 'text-green-400' : 'text-red-400'}>
+              Replay: {diagnostics.replayRecording ? diagnostics.replayCount : 'OFF'}
+            </span>
+          )}
+          {diagnostics.error && <span className="text-red-400 w-full">{diagnostics.error}</span>}
+        </div>
+      )}
 
       <BugReportForm
         title={title}
@@ -238,10 +327,6 @@ export function Popup() {
       {errorMsg && <p className="mt-2 text-red-400 text-xs">{errorMsg}</p>}
 
       <SubmitButton status={status} disabled={!title.trim()} onClick={handleSubmit} />
-
-      <p className="mt-3 text-center text-[10px] text-gray-600">
-        v{chrome.runtime.getManifest().version} &middot; BugSpotter
-      </p>
     </div>
   );
 }
