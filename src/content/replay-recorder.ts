@@ -95,6 +95,10 @@ export function clearReplayBuffer(): void {
   replayBuffer?.clear();
 }
 
+export function getReplayEventCount(): number {
+  return replayBuffer?.getEvents().length ?? 0;
+}
+
 export function isRecording(): boolean {
   return stopFn !== null || pendingAbort !== null;
 }

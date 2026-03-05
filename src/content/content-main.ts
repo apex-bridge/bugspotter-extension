@@ -1,4 +1,10 @@
-import { startReplayRecording, stopReplayRecording, getReplayEvents } from './replay-recorder';
+import {
+  startReplayRecording,
+  stopReplayRecording,
+  getReplayEvents,
+  getReplayEventCount,
+  isRecording,
+} from './replay-recorder';
 import { captureMetadata } from './metadata';
 import {
   CircularBuffer,
@@ -223,6 +229,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({
       type: 'REPLAY_EVENTS',
       data: getReplayEvents(),
+    });
+    return true;
+  }
+
+  if (message.type === 'GET_DIAGNOSTICS') {
+    sendResponse({
+      type: 'DIAGNOSTICS',
+      data: {
+        initialized,
+        consoleCount: consoleBuffer?.getAll().length ?? 0,
+        networkCount: networkBuffer?.getAll().length ?? 0,
+        replayCount: getReplayEventCount(),
+        replayRecording: isRecording(),
+      },
     });
     return true;
   }
