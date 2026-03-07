@@ -160,8 +160,8 @@ function listenForMainWorldCaptures() {
 // the async init(). The main-world capture script (registered via
 // chrome.scripting.registerContentScripts) runs at document_start and fires
 // events right away. Without an early listener those events are lost.
-// Early events won't be sanitized (sanitizer is still null), but that's
-// acceptable — the ternary in the listener already handles null sanitizer.
+// Early events are buffered unsanitized, then retroactively sanitized
+// once init() completes and the sanitizer is ready.
 listenForMainWorldCaptures();
 
 // Load settings and initialize
@@ -185,14 +185,41 @@ async function init() {
     patterns: sanitizationPatterns,
   });
 
-  // If configured sizes differ from the defaults, create new buffers.
-  // Any events captured during the async gap are lost, but the buffer
-  // sizes match user settings going forward.
-  if (maxConsoleEntries !== DEFAULT_CONSOLE_SIZE) {
-    consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
-  }
-  if (maxNetworkEntries !== DEFAULT_NETWORK_SIZE) {
-    networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+  // Retroactively sanitize any entries buffered during the async gap
+  // (before the sanitizer was ready). This closes the PII leak window.
+  if (settings.sanitizationEnabled) {
+    const earlyConsole = consoleBuffer.getAll();
+    const earlyNetwork = networkBuffer.getAll();
+
+    if (maxConsoleEntries !== DEFAULT_CONSOLE_SIZE) {
+      consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
+    } else {
+      consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
+    }
+    for (const entry of earlyConsole) {
+      consoleBuffer.add(sanitizer.sanitize(entry) as ConsoleEntry);
+    }
+
+    if (maxNetworkEntries !== DEFAULT_NETWORK_SIZE) {
+      networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+    } else {
+      networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
+    }
+    for (const entry of earlyNetwork) {
+      networkBuffer.add(sanitizer.sanitize(entry) as NetworkEntry);
+    }
+  } else {
+    // Sanitization disabled — just resize buffers if needed, keeping existing entries
+    if (maxConsoleEntries !== DEFAULT_CONSOLE_SIZE) {
+      const earlyConsole = consoleBuffer.getAll();
+      consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
+      for (const entry of earlyConsole) consoleBuffer.add(entry);
+    }
+    if (maxNetworkEntries !== DEFAULT_NETWORK_SIZE) {
+      const earlyNetwork = networkBuffer.getAll();
+      networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+      for (const entry of earlyNetwork) networkBuffer.add(entry);
+    }
   }
   initialized = true;
 

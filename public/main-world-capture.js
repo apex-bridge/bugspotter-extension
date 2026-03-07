@@ -79,7 +79,7 @@
       }
 
       try {
-        window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+        window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, window.location.origin);
       } catch (e) {
         /* ignore */
       }
@@ -109,7 +109,7 @@
         entry.stack = new Error().stack.split('\n').slice(2).join('\n');
       } catch (e) { /* ignore */ }
       try {
-        window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+        window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, window.location.origin);
       } catch (e) { /* ignore */ }
     }
     OA.apply(console, arguments);
@@ -157,7 +157,7 @@
           requestBody: body,
         };
         try {
-          window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');
+          window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, window.location.origin);
         } catch (e) {
           /* ignore */
         }
@@ -176,7 +176,7 @@
           error: err.message || 'Network error',
         };
         try {
-          window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');
+          window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, window.location.origin);
         } catch (e) {
           /* ignore */
         }
@@ -223,7 +223,7 @@
         error: 'XHR error',
       };
       try {
-        window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');
+        window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, window.location.origin);
       } catch (e) {
         /* ignore */
       }
@@ -253,7 +253,7 @@
         requestBody: xhr._bs_body || '',
       };
       try {
-        window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, '*');
+        window.postMessage({ source: 'bugspotter-capture', type: 'network', data: entry }, window.location.origin);
       } catch (e) {
         /* ignore */
       }
@@ -271,7 +271,7 @@
     if (isDuplicateError(msg)) return;
     var entry = { level: 'error', message: msg, timestamp: Date.now(), args: [] };
     try {
-      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, window.location.origin);
     } catch (err) { /* ignore */ }
   });
 
@@ -313,7 +313,7 @@
     }
     if (isDuplicateError(entry.message)) return;
     try {
-      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, window.location.origin);
     } catch (err) { /* ignore */ }
   }, true); // Use capture phase to catch resource errors that don't bubble
 
@@ -337,7 +337,7 @@
       stack: (reason instanceof Error && reason.stack) ? reason.stack : '',
     };
     try {
-      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, window.location.origin);
     } catch (err) { /* ignore */ }
   });
 })();
