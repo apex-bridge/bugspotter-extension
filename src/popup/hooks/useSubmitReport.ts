@@ -80,6 +80,7 @@ export function useSubmitReport(args: SubmitReportArgs) {
         title,
         description,
         priority,
+        source: 'extension' as const,
         report: {
           console: captureData?.data?.console ?? [],
           network: captureData?.data?.network ?? [],

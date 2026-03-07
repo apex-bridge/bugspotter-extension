@@ -16,10 +16,15 @@ import type { ConsoleEntry, NetworkEntry } from '@/types';
 import { getSettings } from '@/storage/settings';
 
 // -- Buffers in the isolated world (populated via postMessage from main world) --
-let consoleBuffer: CircularBuffer<ConsoleEntry>;
-let networkBuffer: CircularBuffer<NetworkEntry>;
+// Initialise with default sizes immediately so the postMessage listener can
+// buffer events that arrive before the async init() completes.
+const DEFAULT_CONSOLE_SIZE = 100;
+const DEFAULT_NETWORK_SIZE = 50;
+let consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
+let networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
 let sanitizer: Sanitizer | null = null;
 let initialized = false;
+let domainDisallowed = false;
 
 function getConsoleLogs(): ConsoleEntry[] {
   return consoleBuffer?.getAll() ?? [];
@@ -42,18 +47,6 @@ function isDomainAllowed(allowedDomains: string[]): boolean {
     }
     return hostname === d;
   });
-}
-
-/**
- * Inject the main-world capture script via <script src="...">.
- * Chrome MV3 CSP blocks inline scripts, so we load the file from
- * web_accessible_resources instead.
- */
-function injectMainWorldCaptures() {
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('main-world-capture.js');
-  script.onload = () => script.remove();
-  (document.documentElement || document.head || document.body).appendChild(script);
 }
 
 // Caps for string fields coming from postMessage to prevent oversized entries
@@ -101,6 +94,19 @@ function validateConsoleEntry(data: unknown): ConsoleEntry | null {
 const MAX_HEADERS = 50;
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+// Sensitive headers that must never be included in bug reports
+const SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+  'proxy-authorization',
+  'www-authenticate',
+  'x-csrf-token',
+  'x-xsrf-token',
+]);
+
 const MAX_HEADER_KEY_LENGTH = 200;
 
 function sanitizeHeaders(raw: unknown): Record<string, string> {
@@ -111,6 +117,7 @@ function sanitizeHeaders(raw: unknown): Record<string, string> {
   for (const [rawKey, val] of entries) {
     if (count >= MAX_HEADERS) break;
     if (BLOCKED_KEYS.has(rawKey)) continue;
+    if (SENSITIVE_HEADERS.has(rawKey.toLowerCase())) continue;
     const key =
       rawKey.length > MAX_HEADER_KEY_LENGTH ? rawKey.slice(0, MAX_HEADER_KEY_LENGTH) : rawKey;
     result[key] = typeof val === 'string' ? val.slice(0, 1000) : String(val).slice(0, 1000);
@@ -131,6 +138,9 @@ function validateNetworkEntry(data: unknown): NetworkEntry | null {
     duration: typeof d.duration === 'number' ? d.duration : 0,
     timestamp: d.timestamp,
     headers: sanitizeHeaders(d.headers),
+    ...(d.responseHeaders && typeof d.responseHeaders === 'object'
+      ? { responseHeaders: sanitizeHeaders(d.responseHeaders) }
+      : {}),
     ...(typeof d.requestBody === 'string'
       ? { requestBody: truncStr(d.requestBody, MAX_BODY_LENGTH) }
       : {}),
@@ -141,6 +151,7 @@ function validateNetworkEntry(data: unknown): NetworkEntry | null {
 /** Listen for postMessage from the injected main-world script */
 function listenForMainWorldCaptures() {
   window.addEventListener('message', (event) => {
+    if (domainDisallowed) return;
     if (event.source !== window) return;
     const msg = event.data;
     if (!msg || msg.source !== 'bugspotter-capture') return;
@@ -161,11 +172,26 @@ function listenForMainWorldCaptures() {
   });
 }
 
+// Start listening for main-world postMessage events IMMEDIATELY — before
+// the async init(). The main-world capture script (registered via
+// chrome.scripting.registerContentScripts) runs at document_start and fires
+// events right away. Without an early listener those events are lost.
+// Early events are buffered unsanitized, then retroactively sanitized
+// once init() completes and the sanitizer is ready.
+listenForMainWorldCaptures();
+
 // Load settings and initialize
 async function init() {
   const settings = await getSettings();
 
-  if (!isDomainAllowed(settings.allowedDomains)) return;
+  if (!isDomainAllowed(settings.allowedDomains)) {
+    // Domain not allowed — discard any events buffered during the async gap
+    // and prevent the listener from accepting new events
+    domainDisallowed = true;
+    consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
+    networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
+    return;
+  }
 
   const sanitizationPatterns = settings.sanitizationPatterns as PIIPatternName[] | undefined;
   const maxConsoleEntries = settings.maxConsoleEntries;
@@ -177,13 +203,25 @@ async function init() {
     patterns: sanitizationPatterns,
   });
 
-  consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
-  networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
-  initialized = true;
+  // Drain early-buffered entries, create correctly-sized buffers,
+  // and re-add entries (sanitizing them if sanitization is enabled).
+  const earlyConsole = consoleBuffer.getAll();
+  const earlyNetwork = networkBuffer.getAll();
 
-  // Listen first, then inject — ensures no early events are missed
-  listenForMainWorldCaptures();
-  injectMainWorldCaptures();
+  consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
+  for (const entry of earlyConsole) {
+    consoleBuffer.add(
+      settings.sanitizationEnabled ? (sanitizer.sanitize(entry) as ConsoleEntry) : entry,
+    );
+  }
+
+  networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+  for (const entry of earlyNetwork) {
+    networkBuffer.add(
+      settings.sanitizationEnabled ? (sanitizer.sanitize(entry) as NetworkEntry) : entry,
+    );
+  }
+  initialized = true;
 
   // Start session replay if enabled (pass sanitizer for PII masking)
   if (replayEnabled) {

@@ -14,6 +14,7 @@ export interface NetworkEntry {
   duration: number;
   timestamp: number;
   headers: Record<string, string>;
+  responseHeaders?: Record<string, string>;
   requestBody?: string;
   error?: string;
 }
@@ -36,6 +37,7 @@ export interface BugReportPayload {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
+  source: 'extension' | 'sdk' | 'api';
   report: {
     console: ConsoleEntry[];
     network: NetworkEntry[];
