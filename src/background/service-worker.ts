@@ -205,5 +205,24 @@ async function processOfflineQueue() {
 // Process queue on service worker activation
 processOfflineQueue().catch(() => {});
 
+// Register main-world capture script via chrome.scripting API.
+// This bypasses strict page CSP (e.g., banking sites) that would block
+// <script> tag injection. Chrome handles injection at document_start.
+// The content script controls activation: it only listens for postMessage
+// on allowed domains, so data is only captured where configured.
+chrome.scripting
+  .registerContentScripts([
+    {
+      id: 'bugspotter-main-world',
+      matches: ['<all_urls>'],
+      js: ['main-world-capture.js'],
+      world: 'MAIN',
+      runAt: 'document_start',
+    },
+  ])
+  .catch(() => {
+    // Already registered from a previous service worker lifecycle
+  });
+
 // Set badge
 chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });

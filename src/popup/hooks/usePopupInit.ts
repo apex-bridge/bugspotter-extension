@@ -36,11 +36,21 @@ export function usePopupInit() {
     });
 
     // Retrieve any pending annotated screenshot (stored by service worker
-    // while popup was closed during annotation)
+    // while popup was closed during annotation), otherwise auto-capture
     chrome.runtime
       .sendMessage({ type: 'GET_PENDING_SCREENSHOT' })
       .then((res) => {
-        if (res?.data) setScreenshot(res.data);
+        if (res?.data) {
+          setScreenshot(res.data);
+        } else {
+          // Auto-capture screenshot on popup open
+          chrome.runtime
+            .sendMessage({ type: 'CAPTURE_SCREENSHOT' })
+            .then((captureRes) => {
+              if (captureRes?.data) setScreenshot(captureRes.data);
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {});
 

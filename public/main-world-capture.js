@@ -11,6 +11,19 @@
   if (window.__bugspotter_injected) return;
   window.__bugspotter_injected = true;
 
+  /* ---- Deduplication for browser-generated errors ---- */
+  var _lastErrorMsg = '';
+  var _lastErrorTime = 0;
+  var DEDUP_WINDOW_MS = 2000; // suppress identical error messages within 2s
+
+  function isDuplicateError(msg) {
+    var now = Date.now();
+    if (msg === _lastErrorMsg && now - _lastErrorTime < DEDUP_WINDOW_MS) return true;
+    _lastErrorMsg = msg;
+    _lastErrorTime = now;
+    return false;
+  }
+
   /* ---- Console capture ---- */
   var OC = {
     log: console.log,
@@ -75,6 +88,33 @@
     };
   });
 
+  /* ---- console.assert capture ---- */
+  var OA = console.assert;
+  console.assert = function (condition) {
+    if (!condition) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      var msg = 'Assertion failed';
+      if (args.length > 0) {
+        msg += ': ' + args.map(function (a) {
+          if (a === null) return 'null';
+          if (a === undefined) return 'undefined';
+          if (typeof a === 'object') {
+            try { return JSON.stringify(a); } catch (e) { return String(a); }
+          }
+          return String(a);
+        }).join(' ');
+      }
+      var entry = { level: 'error', message: msg, timestamp: Date.now(), args: [] };
+      try {
+        entry.stack = new Error().stack.split('\n').slice(2).join('\n');
+      } catch (e) { /* ignore */ }
+      try {
+        window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+      } catch (e) { /* ignore */ }
+    }
+    OA.apply(console, arguments);
+  };
+
   /* ---- Fetch capture ---- */
   var OF = window.fetch;
   window.fetch = function (input, init) {
@@ -101,6 +141,10 @@
 
     return OF.apply(this, arguments).then(
       function (response) {
+        var respHeaders = {};
+        try {
+          respHeaders = Object.fromEntries(response.headers.entries());
+        } catch (e) { /* ignore */ }
         var entry = {
           url: url,
           method: method,
@@ -109,6 +153,7 @@
           duration: Date.now() - start,
           timestamp: start,
           headers: reqHeaders,
+          responseHeaders: respHeaders,
           requestBody: body,
         };
         try {
@@ -186,6 +231,16 @@
 
     xhr.addEventListener('loadend', function () {
       if (xhr._bs_errored) return; // Already reported by the error handler
+      var respHeaders = {};
+      try {
+        var raw = xhr.getAllResponseHeaders();
+        if (raw) {
+          raw.trim().split('\r\n').forEach(function (line) {
+            var idx = line.indexOf(':');
+            if (idx > 0) respHeaders[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+          });
+        }
+      } catch (e) { /* ignore */ }
       var entry = {
         url: xhr._bs_url || '',
         method: xhr._bs_method || 'GET',
@@ -194,6 +249,7 @@
         duration: Date.now() - (xhr._bs_start || Date.now()),
         timestamp: xhr._bs_start || Date.now(),
         headers: xhr._bs_headers || {},
+        responseHeaders: respHeaders,
         requestBody: xhr._bs_body || '',
       };
       try {
@@ -205,4 +261,83 @@
 
     return OS.apply(this, arguments);
   };
+
+  /* ---- Browser-generated error capture ---- */
+
+  // CSP violations (not reported via console.error)
+  window.addEventListener('securitypolicyviolation', function (e) {
+    var msg = 'CSP violation: ' + (e.violatedDirective || 'unknown directive');
+    if (e.blockedURI) msg += ' — blocked ' + e.blockedURI;
+    if (isDuplicateError(msg)) return;
+    var entry = { level: 'error', message: msg, timestamp: Date.now(), args: [] };
+    try {
+      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+    } catch (err) { /* ignore */ }
+  });
+
+  // Uncaught script errors AND resource load failures
+  window.addEventListener('error', function (e) {
+    var entry;
+    if (e.message) {
+      // Script error
+      entry = {
+        level: 'error',
+        message: e.message,
+        timestamp: Date.now(),
+        args: [],
+        stack: e.filename ? (e.filename + ':' + e.lineno + ':' + e.colno) : '',
+      };
+    } else if (e.target && e.target !== window) {
+      // Resource load failure (img, script, link, etc.)
+      var tag = (e.target.tagName || '').toLowerCase();
+      var src = e.target.src || e.target.href || '';
+      if (!src) return; // No useful info
+      // Determine friendly resource type from element + URL
+      var resType = tag;
+      if (tag === 'link') {
+        resType = /\.css(\?|$|#)/i.test(src) || (e.target.rel || '') === 'stylesheet'
+          ? 'stylesheet' : 'resource';
+      } else if (tag === 'img') {
+        resType = 'image';
+      } else if (tag === 'script' && /\.css(\?|$|#)/i.test(src)) {
+        resType = 'stylesheet';
+      }
+      entry = {
+        level: 'error',
+        message: 'Failed to load ' + resType + ': ' + src,
+        timestamp: Date.now(),
+        args: [],
+      };
+    } else {
+      return;
+    }
+    if (isDuplicateError(entry.message)) return;
+    try {
+      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+    } catch (err) { /* ignore */ }
+  }, true); // Use capture phase to catch resource errors that don't bubble
+
+  // Unhandled promise rejections
+  window.addEventListener('unhandledrejection', function (e) {
+    var reason = e.reason;
+    var msg = 'Unhandled rejection: ';
+    if (reason instanceof Error) {
+      msg += reason.message;
+    } else if (typeof reason === 'string') {
+      msg += reason;
+    } else {
+      try { msg += JSON.stringify(reason); } catch (err) { msg += String(reason); }
+    }
+    if (isDuplicateError(msg)) return;
+    var entry = {
+      level: 'error',
+      message: msg,
+      timestamp: Date.now(),
+      args: [],
+      stack: (reason instanceof Error && reason.stack) ? reason.stack : '',
+    };
+    try {
+      window.postMessage({ source: 'bugspotter-capture', type: 'console', data: entry }, '*');
+    } catch (err) { /* ignore */ }
+  });
 })();

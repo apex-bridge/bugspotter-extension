@@ -98,18 +98,12 @@ export async function validateConnection(settings: Settings): Promise<boolean> {
   if (!settings.baseUrl || !settings.apiKey) return false;
 
   const baseUrl = settings.baseUrl.replace(/\/$/, '');
-  const url = `${baseUrl}/api/v1/projects`;
+  const healthUrl = `${baseUrl}/health`;
 
-  if (!isSecureEndpoint(url)) return false;
+  if (!isSecureEndpoint(healthUrl)) return false;
 
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': settings.apiKey,
-      },
-    });
+    const response = await fetch(healthUrl);
     return response.ok;
   } catch {
     return false;

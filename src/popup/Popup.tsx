@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { BugReportForm } from './components/BugReportForm';
 import { SubmitButton } from './components/SubmitButton';
 import { DiagnosticsBar } from './components/DiagnosticsBar';
@@ -13,33 +13,13 @@ export function Popup() {
   const { screenshot, setScreenshot, configured, replayEnabled, offlineCount, diagnostics } =
     usePopupInit();
 
-  const { status, errorMsg, setErrorMsg, handleSubmit, resetStatus } = useSubmitReport({
+  const { status, errorMsg, handleSubmit, resetStatus } = useSubmitReport({
     title,
     description,
     priority,
     screenshot,
     replayEnabled,
   });
-
-  const handleCapture = useCallback(async () => {
-    const response = await chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
-    if (response.error) {
-      setErrorMsg(response.error);
-      return;
-    }
-    setScreenshot(response.data);
-
-    // Send to content script for annotation
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, {
-        type: 'START_ANNOTATION',
-        screenshot: response.data,
-      });
-      // Close popup while annotating
-      window.close();
-    }
-  }, [setScreenshot, setErrorMsg]);
 
   if (!configured) {
     return (
@@ -110,19 +90,11 @@ export function Popup() {
         onPriorityChange={setPriority}
       />
 
-      <div className="mt-3">
-        <button
-          onClick={handleCapture}
-          className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-medium flex items-center justify-center gap-2"
-        >
-          {screenshot ? 'Re-capture Screenshot' : 'Capture Screenshot'}
-        </button>
-        {screenshot && (
-          <div className="mt-2 border border-gray-700 rounded overflow-hidden">
-            <img src={screenshot} alt="Screenshot" className="w-full" />
-          </div>
-        )}
-      </div>
+      {screenshot && (
+        <div className="mt-3 border border-gray-700 rounded overflow-hidden">
+          <img src={screenshot} alt="Screenshot" className="w-full" />
+        </div>
+      )}
 
       {errorMsg && <p className="mt-2 text-red-400 text-xs">{errorMsg}</p>}
 
