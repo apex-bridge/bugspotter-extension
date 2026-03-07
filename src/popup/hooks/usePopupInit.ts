@@ -49,7 +49,7 @@ export function usePopupInit() {
             .then((captureRes) => {
               if (captureRes?.data) setScreenshot(captureRes.data);
             })
-            .catch(() => {});
+            .catch((err) => console.error('[BugSpotter] Auto-capture screenshot failed:', err));
         }
       })
       .catch(() => {});

@@ -4,8 +4,8 @@
  * Patches console, fetch, and XHR to capture logs and network requests,
  * then relays them via window.postMessage to the isolated-world content script.
  *
- * This file is loaded via <script src="..."> from the content script,
- * NOT as inline code (inline scripts are blocked by Chrome MV3 CSP).
+ * Registered via chrome.scripting.registerContentScripts({ world: "MAIN" })
+ * in the service worker, which bypasses page CSP entirely.
  */
 (function () {
   if (window.__bugspotter_injected) return;
@@ -98,7 +98,11 @@
       if (args.length > 0) {
         msg += ': ' + argsToMessage(args);
       }
-      var entry = { level: 'error', message: msg, timestamp: Date.now(), args: [] };
+      var safeArgs = args.map(function (a) {
+        if (a === null || a === undefined || typeof a !== 'object') return a;
+        try { return JSON.parse(JSON.stringify(a)); } catch (e) { return String(a); }
+      });
+      var entry = { level: 'error', message: msg, timestamp: Date.now(), args: safeArgs };
       try {
         entry.stack = new Error().stack.split('\n').slice(2).join('\n');
       } catch (e) { /* ignore */ }
