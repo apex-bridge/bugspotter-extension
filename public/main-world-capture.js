@@ -24,6 +24,20 @@
     return false;
   }
 
+  /* ---- Shared helpers ---- */
+  function formatArg(a) {
+    if (a === null) return 'null';
+    if (a === undefined) return 'undefined';
+    if (typeof a === 'object') {
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }
+    return String(a);
+  }
+
+  function argsToMessage(args) {
+    return args.map(formatArg).join(' ');
+  }
+
   /* ---- Console capture ---- */
   var OC = {
     log: console.log,
@@ -36,20 +50,7 @@
   ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
     console[level] = function () {
       var args = Array.prototype.slice.call(arguments);
-      var msg = args
-        .map(function (a) {
-          if (a === null) return 'null';
-          if (a === undefined) return 'undefined';
-          if (typeof a === 'object') {
-            try {
-              return JSON.stringify(a);
-            } catch (e) {
-              return String(a);
-            }
-          }
-          return String(a);
-        })
-        .join(' ');
+      var msg = argsToMessage(args);
 
       // Skip BugSpotter's own internal logs (except errors)
       if (level !== 'error' && msg.indexOf('[BugSpotter]') === 0) {
@@ -95,14 +96,7 @@
       var args = Array.prototype.slice.call(arguments, 1);
       var msg = 'Assertion failed';
       if (args.length > 0) {
-        msg += ': ' + args.map(function (a) {
-          if (a === null) return 'null';
-          if (a === undefined) return 'undefined';
-          if (typeof a === 'object') {
-            try { return JSON.stringify(a); } catch (e) { return String(a); }
-          }
-          return String(a);
-        }).join(' ');
+        msg += ': ' + argsToMessage(args);
       }
       var entry = { level: 'error', message: msg, timestamp: Date.now(), args: [] };
       try {

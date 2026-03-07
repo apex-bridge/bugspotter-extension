@@ -103,7 +103,9 @@ export async function validateConnection(settings: Settings): Promise<boolean> {
   if (!isSecureEndpoint(healthUrl)) return false;
 
   try {
-    const response = await fetch(healthUrl);
+    const response = await fetch(healthUrl, {
+      headers: { 'X-API-Key': settings.apiKey },
+    });
     return response.ok;
   } catch {
     return false;

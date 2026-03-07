@@ -24,6 +24,7 @@ let consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
 let networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
 let sanitizer: Sanitizer | null = null;
 let initialized = false;
+let domainDisallowed = false;
 
 function getConsoleLogs(): ConsoleEntry[] {
   return consoleBuffer?.getAll() ?? [];
@@ -93,6 +94,19 @@ function validateConsoleEntry(data: unknown): ConsoleEntry | null {
 const MAX_HEADERS = 50;
 const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+// Sensitive headers that must never be included in bug reports
+const SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+  'proxy-authorization',
+  'www-authenticate',
+  'x-csrf-token',
+  'x-xsrf-token',
+]);
+
 const MAX_HEADER_KEY_LENGTH = 200;
 
 function sanitizeHeaders(raw: unknown): Record<string, string> {
@@ -103,6 +117,7 @@ function sanitizeHeaders(raw: unknown): Record<string, string> {
   for (const [rawKey, val] of entries) {
     if (count >= MAX_HEADERS) break;
     if (BLOCKED_KEYS.has(rawKey)) continue;
+    if (SENSITIVE_HEADERS.has(rawKey.toLowerCase())) continue;
     const key =
       rawKey.length > MAX_HEADER_KEY_LENGTH ? rawKey.slice(0, MAX_HEADER_KEY_LENGTH) : rawKey;
     result[key] = typeof val === 'string' ? val.slice(0, 1000) : String(val).slice(0, 1000);
@@ -136,6 +151,7 @@ function validateNetworkEntry(data: unknown): NetworkEntry | null {
 /** Listen for postMessage from the injected main-world script */
 function listenForMainWorldCaptures() {
   window.addEventListener('message', (event) => {
+    if (domainDisallowed) return;
     if (event.source !== window) return;
     const msg = event.data;
     if (!msg || msg.source !== 'bugspotter-capture') return;
@@ -170,6 +186,8 @@ async function init() {
 
   if (!isDomainAllowed(settings.allowedDomains)) {
     // Domain not allowed — discard any events buffered during the async gap
+    // and prevent the listener from accepting new events
+    domainDisallowed = true;
     consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
     networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
     return;
@@ -185,41 +203,23 @@ async function init() {
     patterns: sanitizationPatterns,
   });
 
-  // Retroactively sanitize any entries buffered during the async gap
-  // (before the sanitizer was ready). This closes the PII leak window.
-  if (settings.sanitizationEnabled) {
-    const earlyConsole = consoleBuffer.getAll();
-    const earlyNetwork = networkBuffer.getAll();
+  // Drain early-buffered entries, create correctly-sized buffers,
+  // and re-add entries (sanitizing them if sanitization is enabled).
+  const earlyConsole = consoleBuffer.getAll();
+  const earlyNetwork = networkBuffer.getAll();
 
-    if (maxConsoleEntries !== DEFAULT_CONSOLE_SIZE) {
-      consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
-    } else {
-      consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
-    }
-    for (const entry of earlyConsole) {
-      consoleBuffer.add(sanitizer.sanitize(entry) as ConsoleEntry);
-    }
+  consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
+  for (const entry of earlyConsole) {
+    consoleBuffer.add(
+      settings.sanitizationEnabled ? (sanitizer.sanitize(entry) as ConsoleEntry) : entry,
+    );
+  }
 
-    if (maxNetworkEntries !== DEFAULT_NETWORK_SIZE) {
-      networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
-    } else {
-      networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
-    }
-    for (const entry of earlyNetwork) {
-      networkBuffer.add(sanitizer.sanitize(entry) as NetworkEntry);
-    }
-  } else {
-    // Sanitization disabled — just resize buffers if needed, keeping existing entries
-    if (maxConsoleEntries !== DEFAULT_CONSOLE_SIZE) {
-      const earlyConsole = consoleBuffer.getAll();
-      consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
-      for (const entry of earlyConsole) consoleBuffer.add(entry);
-    }
-    if (maxNetworkEntries !== DEFAULT_NETWORK_SIZE) {
-      const earlyNetwork = networkBuffer.getAll();
-      networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
-      for (const entry of earlyNetwork) networkBuffer.add(entry);
-    }
+  networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
+  for (const entry of earlyNetwork) {
+    networkBuffer.add(
+      settings.sanitizationEnabled ? (sanitizer.sanitize(entry) as NetworkEntry) : entry,
+    );
   }
   initialized = true;
 

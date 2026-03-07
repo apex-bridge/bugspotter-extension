@@ -220,8 +220,11 @@ chrome.scripting
       runAt: 'document_start',
     },
   ])
-  .catch(() => {
-    // Already registered from a previous service worker lifecycle
+  .catch((err: Error) => {
+    // Ignore expected "already registered" errors from previous service worker lifecycle
+    if (!err.message?.includes('Duplicate script ID')) {
+      console.error('[BugSpotter] Failed to register main-world capture script:', err);
+    }
   });
 
 // Set badge

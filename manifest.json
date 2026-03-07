@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BugSpotter",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Capture bug reports with session replay, PII sanitization, and offline support",
   "permissions": ["activeTab", "storage", "tabs", "scripting"],
   "host_permissions": ["<all_urls>"],
