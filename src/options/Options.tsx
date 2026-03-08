@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSettings, saveSettings } from '@/storage/settings';
+import { getSettings, saveSettings, DEMO_INSTANCE } from '@/storage/settings';
 import { validateConnection } from '@/api/bugspotter-client';
 import {
   getAllPatternNames,
@@ -45,8 +45,11 @@ export function Options() {
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [maxConsoleEntries, setMaxConsoleEntries] = useState(100);
   const [maxNetworkEntries, setMaxNetworkEntries] = useState(50);
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'demo-connecting'>(
+    'idle',
+  );
   const [errorMsg, setErrorMsg] = useState('');
+  const [demoConnected, setDemoConnected] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -123,6 +126,54 @@ export function Options() {
     setTimeout(() => setStatus('idle'), 2000);
   };
 
+  const connectToDemo = async () => {
+    if (!DEMO_INSTANCE.baseUrl || !DEMO_INSTANCE.apiKey) {
+      setStatus('error');
+      setErrorMsg(
+        'Demo instance not configured yet. Enter the URL and API key manually, or contact the BugSpotter team.',
+      );
+      return;
+    }
+
+    setStatus('demo-connecting');
+    setErrorMsg('');
+    setBaseUrl(DEMO_INSTANCE.baseUrl);
+    setApiKey(DEMO_INSTANCE.apiKey);
+    setReplayEnabled(true);
+
+    const valid = await validateConnection({
+      baseUrl: DEMO_INSTANCE.baseUrl,
+      apiKey: DEMO_INSTANCE.apiKey,
+      allowedDomains,
+      sanitizationEnabled,
+      sanitizationPatterns,
+      replayEnabled: true,
+      maxConsoleEntries,
+      maxNetworkEntries,
+    });
+
+    if (!valid) {
+      setStatus('error');
+      setErrorMsg('Could not connect to demo instance. It may be temporarily unavailable.');
+      return;
+    }
+
+    await saveSettings({
+      baseUrl: DEMO_INSTANCE.baseUrl,
+      apiKey: DEMO_INSTANCE.apiKey,
+      allowedDomains,
+      sanitizationEnabled,
+      sanitizationPatterns,
+      replayEnabled: true,
+      maxConsoleEntries,
+      maxNetworkEntries,
+    });
+
+    setDemoConnected(true);
+    setStatus('saved');
+    setTimeout(() => setStatus('idle'), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
       <div className="w-full max-w-md p-6">
@@ -155,6 +206,25 @@ export function Options() {
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 font-mono"
                 />
               </div>
+
+              {/* Connect to Demo Instance */}
+              {!demoConnected && (
+                <button
+                  onClick={connectToDemo}
+                  disabled={status === 'demo-connecting'}
+                  className="w-full py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 rounded text-sm font-medium border border-emerald-600 disabled:border-gray-600"
+                >
+                  {status === 'demo-connecting'
+                    ? 'Connecting...'
+                    : `Connect to ${DEMO_INSTANCE.label}`}
+                </button>
+              )}
+              {demoConnected && (
+                <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                  <span>&#10003;</span>
+                  <span>Connected to {DEMO_INSTANCE.label}</span>
+                </div>
+              )}
             </div>
           </section>
 
@@ -333,6 +403,27 @@ export function Options() {
           >
             {status === 'saving' ? 'Validating...' : 'Save Settings'}
           </button>
+
+          <p className="text-xs text-gray-500 text-center mt-4">
+            BugSpotter v{chrome.runtime.getManifest().version} by{' '}
+            <a
+              href="https://apexbridge.tech"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:underline"
+            >
+              Apex Bridge Technology
+            </a>
+            {' · '}
+            <a
+              href="https://apexbridge.tech/extension/privacy-policy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:underline"
+            >
+              Privacy Policy
+            </a>
+          </p>
         </div>
       </div>
     </div>
