@@ -49,7 +49,12 @@ export function Options() {
     'idle',
   );
   const [errorMsg, setErrorMsg] = useState('');
-  const [demoConnected, setDemoConnected] = useState(false);
+  const demoConnected =
+    DEMO_INSTANCE.apiKey !== '' &&
+    baseUrl === DEMO_INSTANCE.baseUrl &&
+    apiKey === DEMO_INSTANCE.apiKey;
+
+  const isBusy = status === 'saving' || status === 'demo-connecting';
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -127,21 +132,13 @@ export function Options() {
   };
 
   const connectToDemo = async () => {
-    if (!DEMO_INSTANCE.baseUrl || !DEMO_INSTANCE.apiKey) {
-      setStatus('error');
-      setErrorMsg(
-        'Demo instance not configured yet. Enter the URL and API key manually, or contact the BugSpotter team.',
-      );
-      return;
-    }
-
     setStatus('demo-connecting');
     setErrorMsg('');
     setBaseUrl(DEMO_INSTANCE.baseUrl);
     setApiKey(DEMO_INSTANCE.apiKey);
     setReplayEnabled(true);
 
-    const valid = await validateConnection({
+    const demoSettings = {
       baseUrl: DEMO_INSTANCE.baseUrl,
       apiKey: DEMO_INSTANCE.apiKey,
       allowedDomains,
@@ -150,7 +147,9 @@ export function Options() {
       replayEnabled: true,
       maxConsoleEntries,
       maxNetworkEntries,
-    });
+    };
+
+    const valid = await validateConnection(demoSettings);
 
     if (!valid) {
       setStatus('error');
@@ -158,18 +157,7 @@ export function Options() {
       return;
     }
 
-    await saveSettings({
-      baseUrl: DEMO_INSTANCE.baseUrl,
-      apiKey: DEMO_INSTANCE.apiKey,
-      allowedDomains,
-      sanitizationEnabled,
-      sanitizationPatterns,
-      replayEnabled: true,
-      maxConsoleEntries,
-      maxNetworkEntries,
-    });
-
-    setDemoConnected(true);
+    await saveSettings(demoSettings);
     setStatus('saved');
     setTimeout(() => setStatus('idle'), 2000);
   };
@@ -207,11 +195,11 @@ export function Options() {
                 />
               </div>
 
-              {/* Connect to Demo Instance */}
-              {!demoConnected && (
+              {/* Connect to Demo Instance — only shown when demo API key is configured at build time */}
+              {DEMO_INSTANCE.apiKey && !demoConnected && (
                 <button
                   onClick={connectToDemo}
-                  disabled={status === 'demo-connecting'}
+                  disabled={isBusy}
                   className="w-full py-2 bg-emerald-700 hover:bg-emerald-600 disabled:bg-gray-700 disabled:text-gray-500 rounded text-sm font-medium border border-emerald-600 disabled:border-gray-600"
                 >
                   {status === 'demo-connecting'
@@ -394,9 +382,9 @@ export function Options() {
 
           <button
             onClick={handleSave}
-            disabled={!baseUrl || !apiKey || status === 'saving'}
+            disabled={!baseUrl || !apiKey || isBusy}
             className={`w-full py-2 rounded text-sm font-medium ${
-              !baseUrl || !apiKey || status === 'saving'
+              !baseUrl || !apiKey || isBusy
                 ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-blue-600 hover:bg-blue-700 text-white'
             }`}
