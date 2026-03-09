@@ -51,7 +51,7 @@ export function Options() {
   const [errorMsg, setErrorMsg] = useState('');
   const demoConnected =
     DEMO_INSTANCE.apiKey !== '' &&
-    baseUrl === DEMO_INSTANCE.baseUrl &&
+    baseUrl.replace(/\/$/, '') === DEMO_INSTANCE.baseUrl.replace(/\/$/, '') &&
     apiKey === DEMO_INSTANCE.apiKey;
 
   const isBusy = status === 'saving' || status === 'demo-connecting';
@@ -134,9 +134,6 @@ export function Options() {
   const connectToDemo = async () => {
     setStatus('demo-connecting');
     setErrorMsg('');
-    setBaseUrl(DEMO_INSTANCE.baseUrl);
-    setApiKey(DEMO_INSTANCE.apiKey);
-    setReplayEnabled(true);
 
     const demoSettings = {
       baseUrl: DEMO_INSTANCE.baseUrl,
@@ -157,6 +154,9 @@ export function Options() {
       return;
     }
 
+    setBaseUrl(DEMO_INSTANCE.baseUrl);
+    setApiKey(DEMO_INSTANCE.apiKey);
+    setReplayEnabled(true);
     await saveSettings(demoSettings);
     setStatus('saved');
     setTimeout(() => setStatus('idle'), 2000);
