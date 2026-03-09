@@ -22,7 +22,7 @@ BugSpotter captures everything developers need to reproduce a bug — in one cli
 
 • Network requests — HTTP requests and responses with timing, status codes, and headers. Sensitive headers (auth, cookies) are never included.
 
-• Session replay (optional) — watch a recording of what the user did in the last 30 seconds before reporting the bug. Powered by rrweb.
+• Session replay (optional) — watch a recording of what the user did in the last 60 seconds before reporting the bug. Powered by rrweb.
 
 • Browser metadata — browser version, OS, viewport size, timezone, and page URL.
 
@@ -96,7 +96,7 @@ Required to inject content scripts that capture console output and network reque
 
 ### host_permissions: <all_urls>
 
-Required because BugSpotter is a bug reporting tool that must work on any website the user chooses to test. Users control which domains the extension is active on via an explicit domain allowlist in the Options page. The extension captures data only when the user actively opens the popup and submits a report — there is no passive background data collection.
+Required because BugSpotter is a bug reporting tool that must work on any website the user chooses to test. Users control which domains the extension is active on via an explicit domain allowlist in the Options page. On allowed domains, console, network, and optional replay data may be buffered locally in the background while you browse, but this buffered data is only transmitted to your configured BugSpotter server when you actively open the popup and submit a report.
 
 ---
 

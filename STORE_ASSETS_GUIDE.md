@@ -15,13 +15,13 @@
 
 **Recommended screenshots (in order):**
 
-| #   | Screenshot                      | What to Show                                                                                                                                                               |
-| --- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----------- |
-| 1   | **Popup with report form**      | Extension popup open on a real-looking website, with title filled in, priority set to "High", screenshot preview visible, diagnostics bar showing "Console: 12             | Network: 8 | Replay: ON" |
-| 2   | **Annotation overlay**          | Full-screen annotation mode with a rectangle drawn around a UI bug, an arrow pointing to an error message, using red color. Show the toolbar with tools and colors visible |
-| 3   | **Options page — PII settings** | Options page showing the "Kazakhstan" PII preset selected, with IIN/email/phone toggles enabled. Shows the domain allowlist with 2-3 example domains                       |
-| 4   | **Admin dashboard**             | BugSpotter admin panel showing a bug report with the annotated screenshot, console logs tab, and session replay player                                                     |
-| 5   | **Before/After comparison**     | Split image: left side shows a vague Slack message "checkout is broken", right side shows BugSpotter report with full context                                              |
+| #   | Screenshot                      | What to Show                                                                                                                                                                              |
+| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Popup with report form**      | Extension popup open on a real-looking website, with title filled in, priority set to "High", screenshot preview visible, diagnostics bar showing "Console: 12 · Network: 8 · Replay: ON" |
+| 2   | **Annotation overlay**          | Full-screen annotation mode with a rectangle drawn around a UI bug, an arrow pointing to an error message, using red color. Show the toolbar with tools and colors visible                |
+| 3   | **Options page — PII settings** | Options page showing the "Kazakhstan" PII preset selected, with IIN/email/phone toggles enabled. Shows the domain allowlist with 2-3 example domains                                      |
+| 4   | **Admin dashboard**             | BugSpotter admin panel showing a bug report with the annotated screenshot, console logs tab, and session replay player                                                                    |
+| 5   | **Before/After comparison**     | Split image: left side shows a vague Slack message "checkout is broken", right side shows BugSpotter report with full context                                                             |
 
 ### 3. Promotional Tile (Small)
 

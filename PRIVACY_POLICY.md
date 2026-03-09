@@ -18,7 +18,7 @@ BugSpotter is a bug reporting browser extension that helps software teams captur
 
 ## 2. Data Collected
 
-The extension captures the following data **only when you actively submit a bug report**:
+On domains you have allowed, the extension continuously buffers console logs, network requests, and (if enabled) session replay data locally in your browser while you browse. This buffered data is **only transmitted** to your configured server when you actively open the popup and submit a bug report. The following data is included in each report:
 
 ### 2.1. Screenshot
 
@@ -36,12 +36,12 @@ The extension captures the following data **only when you actively submit a bug 
 - HTTP request and response metadata (URL, method, status code, timing, headers).
 - Stored in a rotating buffer (configurable, default: last 50 entries).
 - Sensitive headers (Authorization, Cookie, API keys, CSRF tokens) are **never captured**.
-- Request bodies are truncated to 2,048 characters.
+- Request bodies are truncated to 4,000 characters.
 
 ### 2.4. Session Replay (Optional)
 
 - If enabled in settings, the extension records DOM mutations, mouse movements, clicks, and scrolls using the rrweb library.
-- Recording is limited to a configurable time window (default: 30 seconds).
+- Recording is limited to a configurable time window (default: 60 seconds).
 - Replay data is compressed before upload.
 - This feature is **disabled by default** and must be explicitly enabled.
 
@@ -64,7 +64,7 @@ The extension does **not** collect:
 - Files from your computer
 - Data from tabs other than the currently active tab
 - Data on domains not in your allowed domains list
-- Any data when the extension popup is closed (no background data collection)
+- Any data on domains not in your allowed list (on allowed domains, console and network events are buffered locally but never transmitted unless you submit a report)
 - Analytics, telemetry, or usage statistics
 
 ---
