@@ -63,8 +63,7 @@ The extension does **not** collect:
 - Passwords, form autofill data, or saved credentials
 - Files from your computer
 - Data from tabs other than the currently active tab
-- Data on domains not in your allowed domains list
-- Any data on domains not in your allowed list (on allowed domains, console and network events are buffered locally but never transmitted unless you submit a report)
+- Data on domains not in your allowed list (on allowed domains, console and network events are buffered locally but never transmitted unless you submit a report)
 - Analytics, telemetry, or usage statistics
 
 ---
