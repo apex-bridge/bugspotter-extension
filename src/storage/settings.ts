@@ -3,6 +3,15 @@ import { getAllPatternNames } from '@bugspotter/common';
 
 const SETTINGS_KEY = 'bugspotter_settings';
 
+// Demo instance configuration — injected at build time via VITE_DEMO_API_KEY.
+// NOTE: Any values here are bundled into the extension and effectively public.
+// Use only rate-limited, scoped demo tokens — never privileged keys.
+export const DEMO_INSTANCE = {
+  baseUrl: 'https://api.bugspotter.io',
+  apiKey: (import.meta.env.VITE_DEMO_API_KEY ?? '').trim(),
+  label: 'BugSpotter Cloud',
+} as const;
+
 const DEFAULT_SETTINGS: Settings = {
   baseUrl: '',
   apiKey: '',
