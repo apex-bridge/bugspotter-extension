@@ -4,10 +4,15 @@ Chrome extension (Manifest V3) for capturing bug reports and submitting them to 
 
 ## Features
 
-- One-click screenshot capture with annotation overlay (rectangle, arrow, freehand, text)
-- Auto-capture of console logs and network requests (last 50 each)
-- Full browser metadata collection
-- Project selector with priority picker
+- One-click screenshot capture with annotation overlay (rectangle, arrow, freehand, text in 6 colors)
+- Auto-capture of console logs and network requests (configurable buffer sizes)
+- Session replay recording (optional, powered by rrweb)
+- Built-in PII sanitization — auto-redacts emails, phone numbers, credit cards, SSNs, Kazakhstan IIN/BIN, IP addresses, API keys, and passwords
+- Preset PII profiles: Kazakhstan, GDPR, PCI DSS, Financial, and more
+- Domain allowlist — restrict capture to specific websites
+- Offline queue — reports are saved and retried when connection is restored
+- Project selector with priority picker (Low, Medium, High, Critical)
+- HTTPS-only — refuses to send data over insecure connections
 - Submit directly to BugSpotter via REST API
 
 ## Tech Stack
@@ -86,3 +91,29 @@ Pushing a version tag triggers a GitHub Actions workflow that lints, tests, buil
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+## Privacy & Data Handling
+
+- All data is sent **only** to the BugSpotter server URL you configure — never to Apex Bridge Technology or any third party.
+- PII sanitization runs **locally in your browser** before any data is transmitted.
+- Sensitive HTTP headers (Authorization, Cookie, API keys, CSRF tokens) are **never captured**.
+- No analytics, telemetry, or tracking of any kind.
+- See [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for the full privacy policy.
+
+## Permissions
+
+| Permission   | Purpose                                                                             |
+| ------------ | ----------------------------------------------------------------------------------- |
+| `activeTab`  | Capture a screenshot of the current tab when you click the extension icon           |
+| `storage`    | Save your settings (server URL, API key, domain allowlist, preferences)             |
+| `tabs`       | Read the active tab's URL and title for bug report metadata                         |
+| `scripting`  | Inject console and network capture scripts into the active tab                      |
+| `<all_urls>` | Allow bug reporting on any website you choose (controlled by your domain allowlist) |
+
+## Disclaimer
+
+BugSpotter is provided "as is" without warranty of any kind. The extension captures data from web pages you visit and sends it to a server you configure. You are responsible for ensuring that your use of BugSpotter complies with applicable privacy laws and your organization's data handling policies. Do not use BugSpotter on websites where you do not have authorization to capture data.
+
+## License
+
+Copyright 2026 Apex Bridge Technology. All rights reserved.
