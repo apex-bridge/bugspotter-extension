@@ -8,7 +8,7 @@ const SETTINGS_KEY = 'bugspotter_settings';
 // Use only rate-limited, scoped demo tokens — never privileged keys.
 export const DEMO_INSTANCE = {
   baseUrl: 'https://api.bugspotter.io',
-  apiKey: import.meta.env.VITE_DEMO_API_KEY ?? '',
+  apiKey: (import.meta.env.VITE_DEMO_API_KEY ?? '').trim(),
   label: 'BugSpotter Cloud',
 } as const;
 
