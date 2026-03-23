@@ -18,20 +18,20 @@ function rrwebDecodeInlineWorkers(): Plugin {
     transform(code, id) {
       if (!id.includes('rrweb')) return null;
 
-      const encodedMatch = code.match(/const encodedJs = "([^"]+)"/);
+      const encodedMatch = code.match(/const\s+encodedJs\s*=\s*"([^"]+)"/);
       if (!encodedMatch) return null;
 
       const decoded = Buffer.from(encodedMatch[1], 'base64').toString('utf8');
 
-      // Replace the base64 blob + Blob/URL worker creation with a plain
-      // string that is used directly in a data-URL fallback.  The decoded
-      // source is kept as a readable template literal so reviewers (and the
-      // Chrome Web Store automated scanner) can inspect it.
+      // Replace the inlined base64 blob with a decoded, human-readable
+      // JavaScript string that is re-encoded via btoa at build time. The
+      // decoded source is kept as a readable template literal so reviewers
+      // (and the Chrome Web Store automated scanner) can inspect it.
       const readable = decoded.replace(/`/g, '\\`').replace(/\$/g, '\\$');
       const replacement = `const encodedJs = btoa(\`${readable}\`)`;
 
       return {
-        code: code.replace(`const encodedJs = "${encodedMatch[1]}"`, replacement),
+        code: code.replace(encodedMatch[0], replacement),
         map: null,
       };
     },
