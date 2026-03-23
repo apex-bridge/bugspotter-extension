@@ -1,11 +1,92 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+import { Buffer } from 'node:buffer';
 import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
 import manifest from './manifest.json';
 import path from 'path';
 
+/**
+ * Vite plugin that decodes base64-inlined web workers in rrweb into readable
+ * JavaScript. Chrome Web Store rejects extensions that contain base64-encoded
+ * code blobs because they look like obfuscated code. This plugin replaces the
+ * encoded string at build time with the decoded, human-readable source so the
+ * bundle passes the "Code Readability Requirements" review.
+ *
+ * NOTE: The regex below is coupled to rrweb's internal bundling pattern
+ * (an `encodedJs = "..."` assignment). If rrweb changes how it inlines its
+ * canvas worker (e.g. different variable name or template literals), the
+ * closeBundle hook will emit a build warning. After upgrading rrweb, verify
+ * the build output has no long base64 strings in the content script bundle.
+ */
+function rrwebDecodeInlineWorkers(): Plugin {
+  let totalMatches = 0;
+  let totalReplacements = 0;
+
+  return {
+    name: 'rrweb-decode-inline-workers',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.includes('rrweb')) return null;
+
+      const pattern = /(const|let|var)\s+encodedJs\s*=\s*['"]([^'"]+)['"]/g;
+      let replacementsInFile = 0;
+
+      // Replace every inlined base64 blob with a decoded, human-readable
+      // JavaScript string. The decoded source is emitted as a normal string
+      // literal (via JSON.stringify) so escape sequences are preserved
+      // byte-for-byte, and is re-encoded via btoa at runtime in the
+      // browser/worker context.
+      const newCode = code.replace(pattern, (match, keyword, encoded) => {
+        totalMatches += 1;
+        try {
+          const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+
+          // Buffer.from silently handles malformed base64 — verify the
+          // round-trip produces the same payload to catch corruption.
+          const roundTrip = Buffer.from(decoded, 'utf8').toString('base64');
+          if (roundTrip !== encoded) {
+            this.warn(
+              `rrweb-decode-inline-workers: base64 round-trip mismatch in ${id}, skipping replacement`,
+            );
+            return match;
+          }
+
+          replacementsInFile += 1;
+          return `${keyword} encodedJs = btoa(${JSON.stringify(decoded)})`;
+        } catch (error) {
+          this.warn(
+            `rrweb-decode-inline-workers: error decoding base64 in ${id}: ${error instanceof Error ? error.message : String(error)}, skipping replacement`,
+          );
+          return match;
+        }
+      });
+
+      if (replacementsInFile === 0) return null;
+
+      totalReplacements += replacementsInFile;
+      return {
+        code: newCode,
+      };
+    },
+    closeBundle() {
+      if (totalMatches === 0) {
+        this.warn(
+          'rrweb-decode-inline-workers: no base64 worker blob was found in rrweb. ' +
+            'The rrweb bundling pattern may have changed — check the build output ' +
+            'for long base64 strings before submitting to the Chrome Web Store.',
+        );
+      } else if (totalReplacements < totalMatches) {
+        this.warn(
+          `rrweb-decode-inline-workers: ${totalMatches - totalReplacements} of ${totalMatches} ` +
+            'base64 blobs could not be replaced — check the build output for remaining base64 strings.',
+        );
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), crx({ manifest })],
+  plugins: [rrwebDecodeInlineWorkers(), react(), crx({ manifest })],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
