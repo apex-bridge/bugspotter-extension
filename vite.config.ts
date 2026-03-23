@@ -19,7 +19,8 @@ import path from 'path';
  * the build output has no long base64 strings in the content script bundle.
  */
 function rrwebDecodeInlineWorkers(): Plugin {
-  let didReplace = false;
+  let totalMatches = 0;
+  let totalReplacements = 0;
 
   return {
     name: 'rrweb-decode-inline-workers',
@@ -36,36 +37,48 @@ function rrwebDecodeInlineWorkers(): Plugin {
       // byte-for-byte, and is re-encoded via btoa at runtime in the
       // browser/worker context.
       const newCode = code.replace(pattern, (match, keyword, encoded) => {
-        const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+        totalMatches += 1;
+        try {
+          const decoded = Buffer.from(encoded, 'base64').toString('utf8');
 
-        // Buffer.from silently handles malformed base64 — verify the
-        // round-trip produces the same payload to catch corruption.
-        const roundTrip = Buffer.from(decoded, 'utf8').toString('base64');
-        if (roundTrip !== encoded) {
+          // Buffer.from silently handles malformed base64 — verify the
+          // round-trip produces the same payload to catch corruption.
+          const roundTrip = Buffer.from(decoded, 'utf8').toString('base64');
+          if (roundTrip !== encoded) {
+            this.warn(
+              `rrweb-decode-inline-workers: base64 round-trip mismatch in ${id}, skipping replacement`,
+            );
+            return match;
+          }
+
+          replacementsInFile += 1;
+          return `${keyword} encodedJs = btoa(${JSON.stringify(decoded)})`;
+        } catch (error) {
           this.warn(
-            `rrweb-decode-inline-workers: base64 round-trip mismatch in ${id}, skipping replacement`,
+            `rrweb-decode-inline-workers: error decoding base64 in ${id}: ${error instanceof Error ? error.message : String(error)}, skipping replacement`,
           );
           return match;
         }
-
-        replacementsInFile += 1;
-        return `${keyword} encodedJs = btoa(${JSON.stringify(decoded)})`;
       });
 
       if (replacementsInFile === 0) return null;
 
-      didReplace = true;
+      totalReplacements += replacementsInFile;
       return {
         code: newCode,
-        map: null,
       };
     },
     closeBundle() {
-      if (!didReplace) {
+      if (totalMatches === 0) {
         this.warn(
           'rrweb-decode-inline-workers: no base64 worker blob was found in rrweb. ' +
             'The rrweb bundling pattern may have changed — check the build output ' +
             'for long base64 strings before submitting to the Chrome Web Store.',
+        );
+      } else if (totalReplacements < totalMatches) {
+        this.warn(
+          `rrweb-decode-inline-workers: ${totalMatches - totalReplacements} of ${totalMatches} ` +
+            'base64 blobs could not be replaced — check the build output for remaining base64 strings.',
         );
       }
     },
