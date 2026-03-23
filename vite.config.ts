@@ -20,13 +20,15 @@ import path from 'path';
  * the build output has no long base64 strings in the content script bundle.
  */
 function rrwebDecodeInlineWorkers(): Plugin {
+  let didReplace = false;
+
   return {
     name: 'rrweb-decode-inline-workers',
     enforce: 'pre',
     transform(code, id) {
       if (!id.includes('rrweb')) return null;
 
-      const encodedMatch = code.match(/const\s+encodedJs\s*=\s*"([^"]+)"/);
+      const encodedMatch = code.match(/const\s+encodedJs\s*=\s*['"]([^'"]+)['"]/);
       if (!encodedMatch) return null;
 
       const decoded = Buffer.from(encodedMatch[1], 'base64').toString('utf8');
@@ -38,10 +40,20 @@ function rrwebDecodeInlineWorkers(): Plugin {
       // browser/worker context.
       const replacement = `const encodedJs = btoa(${JSON.stringify(decoded)})`;
 
+      didReplace = true;
       return {
         code: code.replace(encodedMatch[0], replacement),
         map: null,
       };
+    },
+    closeBundle() {
+      if (!didReplace) {
+        this.warn(
+          'rrweb-decode-inline-workers: no base64 worker blob was found in rrweb. ' +
+            'The rrweb bundling pattern may have changed — check the build output ' +
+            'for long base64 strings before submitting to the Chrome Web Store.',
+        );
+      }
     },
   };
 }
