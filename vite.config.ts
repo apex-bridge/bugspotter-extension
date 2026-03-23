@@ -27,7 +27,7 @@ function rrwebDecodeInlineWorkers(): Plugin {
     transform(code, id) {
       if (!id.includes('rrweb')) return null;
 
-      const pattern = /(?:const|let|var)\s+encodedJs\s*=\s*['"]([^'"]+)['"]/g;
+      const pattern = /(const|let|var)\s+encodedJs\s*=\s*['"]([^'"]+)['"]/g;
       let replacementsInFile = 0;
 
       // Replace every inlined base64 blob with a decoded, human-readable
@@ -35,15 +35,21 @@ function rrwebDecodeInlineWorkers(): Plugin {
       // literal (via JSON.stringify) so escape sequences are preserved
       // byte-for-byte, and is re-encoded via btoa at runtime in the
       // browser/worker context.
-      const newCode = code.replace(pattern, (match, encoded) => {
-        try {
-          const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-          replacementsInFile += 1;
-          return `const encodedJs = btoa(${JSON.stringify(decoded)})`;
-        } catch {
-          this.warn(`rrweb-decode-inline-workers: failed to decode base64 string in ${id}`);
+      const newCode = code.replace(pattern, (match, keyword, encoded) => {
+        const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+
+        // Buffer.from silently handles malformed base64 — verify the
+        // round-trip produces the same payload to catch corruption.
+        const roundTrip = Buffer.from(decoded, 'utf8').toString('base64');
+        if (roundTrip !== encoded) {
+          this.warn(
+            `rrweb-decode-inline-workers: base64 round-trip mismatch in ${id}, skipping replacement`,
+          );
           return match;
         }
+
+        replacementsInFile += 1;
+        return `${keyword} encodedJs = btoa(${JSON.stringify(decoded)})`;
       });
 
       if (replacementsInFile === 0) return null;
