@@ -161,7 +161,7 @@ If you have questions about this privacy policy or BugSpotter's data practices:
 
 - **Email:** support@apexbridge.tech
 - **Website:** https://apexbridge.tech
-- **GitHub:** https://github.com/apexbridge-tech
+- **GitHub:** https://github.com/apex-bridge
 
 ---
 

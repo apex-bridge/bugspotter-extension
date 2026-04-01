@@ -26,7 +26,7 @@ Chrome extension (Manifest V3) for capturing bug reports and submitting them to 
 
 ### Quick Install
 
-1. **[Download latest release](https://github.com/apexbridge-tech/bugspotter-extension/releases/latest)** — grab the `bugspotter-extension-v*.zip` file
+1. **[Download latest release](https://github.com/apex-bridge/bugspotter-extension/releases/latest)** — grab the `bugspotter-extension-v*.zip` file
 2. Unzip the downloaded file
 3. Open `chrome://extensions` in Chrome
 4. Enable **Developer mode** (top-right toggle)
