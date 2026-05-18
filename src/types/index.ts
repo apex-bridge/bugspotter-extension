@@ -112,7 +112,7 @@ export type MessageType =
   | { type: 'STOP_REPLAY' }
   | { type: 'REPLAY_PRELOAD' }
   | { type: 'REPLAY_APPEND'; events: unknown[] }
-  | { type: 'REPLAY_GET_ALL' }
+  | { type: 'REPLAY_GET_ALL'; tabId?: number }
   | { type: 'REPLAY_CLEAR'; tabId?: number }
   | { type: 'GET_PENDING_SCREENSHOT' }
   | { type: 'GET_OFFLINE_QUEUE_SIZE' };

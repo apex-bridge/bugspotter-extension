@@ -51,16 +51,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'REPLAY_GET_ALL') {
-    // Caller can be popup (no sender.tab) — they must provide tabId in the
-    // message, or we look up the active tab. Content scripts implicitly use
-    // their own tab.
-    const explicitTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
+    // Resolve target tabId with sender precedence to prevent a content script
+    // from reading another tab's replay by forging `message.tabId`. Browser-
+    // verified `sender.tab.id` always wins; only internal contexts (popup,
+    // options) without a `sender.tab` may pass an explicit tabId, and falling
+    // back to the active tab uses `lastFocusedWindow` which is reliable from
+    // an MV3 service worker (unlike `currentWindow`, which is undefined here).
     const tabIdPromise: Promise<number | undefined> =
-      explicitTabId !== undefined
-        ? Promise.resolve(explicitTabId)
-        : sender.tab?.id !== undefined
-          ? Promise.resolve(sender.tab.id)
-          : chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => tabs[0]?.id);
+      sender.tab?.id !== undefined
+        ? Promise.resolve(sender.tab.id)
+        : typeof message.tabId === 'number'
+          ? Promise.resolve(message.tabId)
+          : chrome.tabs
+              .query({ active: true, lastFocusedWindow: true })
+              .then((tabs) => tabs[0]?.id);
     tabIdPromise
       .then(async (tabId) => {
         if (typeof tabId !== 'number') {
@@ -78,13 +82,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'REPLAY_CLEAR') {
-    const explicitTabId = typeof message.tabId === 'number' ? message.tabId : undefined;
+    // Same sender-precedence + lastFocusedWindow rationale as REPLAY_GET_ALL.
     const tabIdPromise: Promise<number | undefined> =
-      explicitTabId !== undefined
-        ? Promise.resolve(explicitTabId)
-        : sender.tab?.id !== undefined
-          ? Promise.resolve(sender.tab.id)
-          : chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => tabs[0]?.id);
+      sender.tab?.id !== undefined
+        ? Promise.resolve(sender.tab.id)
+        : typeof message.tabId === 'number'
+          ? Promise.resolve(message.tabId)
+          : chrome.tabs
+              .query({ active: true, lastFocusedWindow: true })
+              .then((tabs) => tabs[0]?.id);
     tabIdPromise
       .then(async (tabId) => {
         if (typeof tabId !== 'number') {
