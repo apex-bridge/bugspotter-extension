@@ -21,7 +21,7 @@ function keyFor(tabId: number): string {
   return `${KEY_PREFIX}${tabId}`;
 }
 
-function pruneEvents(events: ReplayEvent[], windowSeconds: number): ReplayEvent[] {
+export function pruneEvents(events: ReplayEvent[], windowSeconds: number): ReplayEvent[] {
   if (events.length === 0) return events;
 
   const cutoff = Date.now() - windowSeconds * 1000;
@@ -105,10 +105,110 @@ export async function clearReplay(tabId: number): Promise<void> {
   });
 }
 
-export async function clearAllReplays(): Promise<void> {
-  const all = await chrome.storage.session.get(null);
-  const keysToRemove = Object.keys(all).filter((k) => k.startsWith(KEY_PREFIX));
-  if (keysToRemove.length > 0) {
-    await chrome.storage.session.remove(keysToRemove);
+/**
+ * Resolve which tab a replay message targets.
+ *
+ * Sender precedence is critical for security: a content script can forge
+ * `message.tabId`, but never `sender.tab.id` (the browser sets that). So when
+ * the message arrives from a tab, that tab's id always wins. Only messages
+ * from internal contexts (popup, options) — where `sender.tab` is undefined —
+ * may pass an explicit `fallback`. The last-resort active-tab query uses
+ * `lastFocusedWindow: true` because `currentWindow: true` is undefined in MV3
+ * service workers.
+ */
+export function resolveTabId(
+  sender: chrome.runtime.MessageSender,
+  fallback?: number,
+): Promise<number | undefined> {
+  if (sender.tab?.id !== undefined) return Promise.resolve(sender.tab.id);
+  if (typeof fallback === 'number') return Promise.resolve(fallback);
+  return chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => tabs[0]?.id);
+}
+
+interface ReplayMessage {
+  type: string;
+  tabId?: number;
+  events?: ReplayEvent[];
+}
+
+/**
+ * Route REPLAY_* messages to the store. Returns true if the message was a
+ * replay message (so the listener should `return true` to keep the response
+ * channel open for the async sendResponse). Returns false if the message
+ * isn't ours, so the caller can fall through to other handlers.
+ */
+export function handleReplayMessage(
+  message: ReplayMessage,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: unknown) => void,
+): boolean {
+  switch (message?.type) {
+    case 'REPLAY_PRELOAD': {
+      const tabId = sender.tab?.id;
+      if (typeof tabId !== 'number') {
+        sendResponse({ events: [] });
+        return true;
+      }
+      getReplay(tabId)
+        .then((events) => sendResponse({ events }))
+        .catch((err) => {
+          console.error('[BugSpotter] REPLAY_PRELOAD failed:', err);
+          sendResponse({ events: [] });
+        });
+      return true;
+    }
+
+    case 'REPLAY_APPEND': {
+      const tabId = sender.tab?.id;
+      if (typeof tabId !== 'number') {
+        sendResponse({ ok: false });
+        return true;
+      }
+      const events = message.events ?? [];
+      appendReplay(tabId, events)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => {
+          console.error('[BugSpotter] REPLAY_APPEND failed:', err);
+          sendResponse({ ok: false });
+        });
+      return true;
+    }
+
+    case 'REPLAY_GET_ALL': {
+      resolveTabId(sender, message.tabId)
+        .then(async (tabId) => {
+          if (typeof tabId !== 'number') {
+            sendResponse({ events: [] });
+            return;
+          }
+          const events = await getReplay(tabId);
+          sendResponse({ events });
+        })
+        .catch((err) => {
+          console.error('[BugSpotter] REPLAY_GET_ALL failed:', err);
+          sendResponse({ events: [] });
+        });
+      return true;
+    }
+
+    case 'REPLAY_CLEAR': {
+      resolveTabId(sender, message.tabId)
+        .then(async (tabId) => {
+          if (typeof tabId !== 'number') {
+            sendResponse({ ok: false });
+            return;
+          }
+          await clearReplay(tabId);
+          sendResponse({ ok: true });
+        })
+        .catch((err) => {
+          console.error('[BugSpotter] REPLAY_CLEAR failed:', err);
+          sendResponse({ ok: false });
+        });
+      return true;
+    }
+
+    default:
+      return false;
   }
 }
