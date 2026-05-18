@@ -14,6 +14,7 @@ Manifest V3, Vite + React + TypeScript. Publishes to the Chrome Web Store.
 
 - `chrome.storage.sync` — user settings (`bugspotter_settings` key). Roams with the Google account.
 - `chrome.storage.local` — transient / larger data (pending screenshots, offline queue).
+- `chrome.storage.session` — in-memory state that survives SW eviction but not browser restart; used for short-lived per-tab data (helpers in `src/storage/settings.ts`).
 - MV3 service workers can be evicted at any moment; never stash state in module-level variables and expect it to be there on the next event. Read from storage each time.
 
 ## Shared PII patterns
