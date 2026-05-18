@@ -1,27 +1,54 @@
 /**
  * Session replay recorder using rrweb.
- * Ported from bugspotter-sdk/src/collectors/dom.ts
  *
- * Records DOM mutations and user interactions into a TimeBasedBuffer.
- * Start/stop controlled via messages from the service worker.
+ * Records DOM mutations and user interactions, streaming them in batches to a
+ * caller-supplied `onBatch` sink. The actual replay buffer lives in the service
+ * worker (chrome.storage.session, keyed per tab), so the recording survives
+ * full-page navigations — when the content script re-runs on a new URL, the
+ * previously-streamed events are still in storage and stitched together by the
+ * viewer.
+ *
+ * Module-level state (`stopFn`, `pendingBatch`) is per-content-script-instance
+ * and resets on navigation. That is intentional: each instance only owns its
+ * own page's recording window; cross-page persistence is the SW's job.
  */
 
 import { record } from 'rrweb';
-import { TimeBasedBuffer, type ReplayEvent, type Sanitizer } from '@bugspotter/common';
+import type { ReplayEvent, Sanitizer } from '@bugspotter/common';
 
-let replayBuffer: TimeBasedBuffer | null = null;
+const BATCH_FLUSH_INTERVAL_MS = 1000;
+
 let stopFn: (() => void) | null = null;
 let pendingAbort: AbortController | null = null;
 let activeSanitizer: Sanitizer | null = null;
+let pendingBatch: ReplayEvent[] = [];
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+let onBatchCallback: ((batch: ReplayEvent[]) => void) | null = null;
 
-function beginRecording(durationSeconds: number): void {
+function drainBatch(): ReplayEvent[] {
+  if (pendingBatch.length === 0) return [];
+  const batch = pendingBatch;
+  pendingBatch = [];
+  return batch;
+}
+
+function flushBatchToSink(): void {
+  const batch = drainBatch();
+  if (batch.length === 0 || !onBatchCallback) return;
+  try {
+    onBatchCallback(batch);
+  } catch (err) {
+    console.error('[BugSpotter] replay batch sink failed:', err);
+  }
+}
+
+function beginRecording(): void {
   pendingAbort = null;
-  replayBuffer = new TimeBasedBuffer(durationSeconds);
 
   stopFn =
     record({
       emit(event) {
-        replayBuffer?.add(event as ReplayEvent);
+        pendingBatch.push(event as ReplayEvent);
       },
       blockClass: 'bugspotter-ignore',
       maskAllInputs: true,
@@ -51,12 +78,25 @@ function beginRecording(durationSeconds: number): void {
       },
       inlineStylesheet: true,
     }) ?? null;
+
+  flushTimer = setInterval(flushBatchToSink, BATCH_FLUSH_INTERVAL_MS);
 }
 
-export function startReplayRecording(durationSeconds = 60, sanitizer?: Sanitizer): void {
+export interface StartReplayOptions {
+  sanitizer?: Sanitizer;
+  /**
+   * Called with each batch of events. The sink owns persistence — typically
+   * forwards to the service worker which writes to chrome.storage.session.
+   * Called from setInterval and on explicit `forceFlushReplayBatch()`.
+   */
+  onBatch: (batch: ReplayEvent[]) => void;
+}
+
+export function startReplayRecording(options: StartReplayOptions): void {
   if (stopFn || pendingAbort) return; // already recording or pending
 
-  if (sanitizer) activeSanitizer = sanitizer;
+  if (options.sanitizer) activeSanitizer = options.sanitizer;
+  onBatchCallback = options.onBatch;
 
   // rrweb needs at least document.documentElement to take a snapshot.
   // Content scripts run at document_start where body may not exist yet.
@@ -66,39 +106,44 @@ export function startReplayRecording(durationSeconds = 60, sanitizer?: Sanitizer
     document.addEventListener(
       'DOMContentLoaded',
       () => {
-        if (!abort.signal.aborted) beginRecording(durationSeconds);
+        if (!abort.signal.aborted) beginRecording();
       },
       { once: true, signal: abort.signal },
     );
   } else {
-    beginRecording(durationSeconds);
+    beginRecording();
   }
 }
 
 export function stopReplayRecording(): void {
-  // Cancel pending DOMContentLoaded start if stop is called before DOM is ready
   if (pendingAbort) {
     pendingAbort.abort();
     pendingAbort = null;
   }
+  if (flushTimer) {
+    clearInterval(flushTimer);
+    flushTimer = null;
+  }
+  flushBatchToSink();
   if (stopFn) {
     stopFn();
     stopFn = null;
   }
 }
 
-export function getReplayEvents(): ReplayEvent[] {
-  return replayBuffer?.getEvents() ?? [];
-}
-
-export function clearReplayBuffer(): void {
-  replayBuffer?.clear();
-}
-
-export function getReplayEventCount(): number {
-  return replayBuffer?.getEvents().length ?? 0;
+/**
+ * Synchronously drain whatever's accumulated since the last flush and hand it
+ * to the sink. Used by `pagehide` and by the popup's submit path so the SW has
+ * the latest events before the report is built.
+ */
+export function forceFlushReplayBatch(): void {
+  flushBatchToSink();
 }
 
 export function isRecording(): boolean {
   return stopFn !== null || pendingAbort !== null;
+}
+
+export function getPendingBatchSize(): number {
+  return pendingBatch.length;
 }
