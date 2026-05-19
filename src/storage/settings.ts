@@ -20,8 +20,10 @@ const DEFAULT_SETTINGS: Settings = {
   sanitizationPatterns: getAllPatternNames(),
   replayEnabled: false,
   replayInputMasking: 'all',
-  maxConsoleEntries: 100,
-  maxNetworkEntries: 50,
+  // Defaults raised when console + network capture started persisting across
+  // navigations — the buffers now cover multiple pages, so 100/50 ran out fast.
+  maxConsoleEntries: 300,
+  maxNetworkEntries: 150,
 };
 
 export async function getSettings(): Promise<Settings> {

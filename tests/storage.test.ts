@@ -17,8 +17,8 @@ describe('storage/settings', () => {
       expect(settings.allowedDomains).toEqual([]);
       expect(settings.sanitizationEnabled).toBe(true);
       expect(settings.replayEnabled).toBe(false);
-      expect(settings.maxConsoleEntries).toBe(100);
-      expect(settings.maxNetworkEntries).toBe(50);
+      expect(settings.maxConsoleEntries).toBe(300);
+      expect(settings.maxNetworkEntries).toBe(150);
       expect(settings.sanitizationPatterns).toContain('email');
     });
 
@@ -29,7 +29,7 @@ describe('storage/settings', () => {
       expect(settings.apiKey).toBe('bgs_testkey123');
       // Defaults should still be present
       expect(settings.sanitizationEnabled).toBe(true);
-      expect(settings.maxConsoleEntries).toBe(100);
+      expect(settings.maxConsoleEntries).toBe(300);
     });
   });
 

@@ -46,8 +46,8 @@ export function Options() {
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [replayInputMasking, setReplayInputMasking] =
     useState<Settings['replayInputMasking']>('all');
-  const [maxConsoleEntries, setMaxConsoleEntries] = useState(100);
-  const [maxNetworkEntries, setMaxNetworkEntries] = useState(50);
+  const [maxConsoleEntries, setMaxConsoleEntries] = useState(300);
+  const [maxNetworkEntries, setMaxNetworkEntries] = useState(150);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'demo-connecting'>(
     'idle',
   );
@@ -378,7 +378,7 @@ export function Options() {
                 <input
                   type="range"
                   min={10}
-                  max={500}
+                  max={1000}
                   step={10}
                   value={maxConsoleEntries}
                   onChange={(e) => setMaxConsoleEntries(Number(e.target.value))}
@@ -392,7 +392,7 @@ export function Options() {
                 <input
                   type="range"
                   min={10}
-                  max={500}
+                  max={1000}
                   step={10}
                   value={maxNetworkEntries}
                   onChange={(e) => setMaxNetworkEntries(Number(e.target.value))}

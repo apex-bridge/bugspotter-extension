@@ -7,33 +7,22 @@ import {
 } from './replay-recorder';
 import type { ReplayEvent } from '@bugspotter/common';
 import { captureMetadata } from './metadata';
-import {
-  CircularBuffer,
-  createSanitizer,
-  type Sanitizer,
-  type PIIPatternName,
-} from '@bugspotter/common';
+import { createSanitizer, type Sanitizer, type PIIPatternName } from '@bugspotter/common';
 import type { ConsoleEntry, NetworkEntry } from '@/types';
 import { getSettings } from '@/storage/settings';
 
-// -- Buffers in the isolated world (populated via postMessage from main world) --
-// Initialise with default sizes immediately so the postMessage listener can
-// buffer events that arrive before the async init() completes.
-const DEFAULT_CONSOLE_SIZE = 100;
-const DEFAULT_NETWORK_SIZE = 50;
-let consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
-let networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
+// Pending batches that are streamed to the service worker (which keeps the
+// authoritative per-tab buffer in chrome.storage.session, so the data
+// survives full-page navigations). These arrays only ever hold entries since
+// the last flush — ~5s worth in steady state.
+const CAPTURE_FLUSH_INTERVAL_MS = 5000;
+let consolePending: ConsoleEntry[] = [];
+let networkPending: NetworkEntry[] = [];
+let activeMaxConsoleEntries = 300;
+let activeMaxNetworkEntries = 150;
 let sanitizer: Sanitizer | null = null;
 let initialized = false;
 let domainDisallowed = false;
-
-function getConsoleLogs(): ConsoleEntry[] {
-  return consoleBuffer?.getAll() ?? [];
-}
-
-function getNetworkRequests(): NetworkEntry[] {
-  return networkBuffer?.getAll() ?? [];
-}
 
 // Check if the current page's domain matches the allowlist.
 function isDomainAllowed(allowedDomains: string[]): boolean {
@@ -161,16 +150,71 @@ function listenForMainWorldCaptures() {
       const validated = validateConsoleEntry(msg.data);
       if (!validated) return;
       const entry = sanitizer ? (sanitizer.sanitize(validated) as ConsoleEntry) : validated;
-      consoleBuffer.add(entry);
+      consolePending.push(entry);
+      // Safety cap — drop oldest if the buffer grows past the configured
+      // storage cap. Prevents unbounded memory if the SW is unresponsive or
+      // the page is extremely chatty between flushes.
+      if (consolePending.length > activeMaxConsoleEntries) {
+        consolePending.shift();
+      }
     }
 
     if (msg.type === 'network') {
       const validated = validateNetworkEntry(msg.data);
       if (!validated) return;
       const entry = sanitizer ? (sanitizer.sanitize(validated) as NetworkEntry) : validated;
-      networkBuffer.add(entry);
+      networkPending.push(entry);
+      if (networkPending.length > activeMaxNetworkEntries) {
+        networkPending.shift();
+      }
     }
   });
+}
+
+function suppressTeardownErrors(err: unknown): void {
+  if (
+    !String((err as { message?: string })?.message ?? err).match(
+      /Extension context invalidated|Receiving end does not exist/i,
+    )
+  ) {
+    console.warn('[BugSpotter] capture flush failed:', err);
+  }
+}
+
+async function flushCapturePending(): Promise<void> {
+  // Gate on init completion so an early pagehide / GET_CAPTURE_DATA can't
+  // leak unsanitized entries to storage. The drain step at the end of init()
+  // retroactively sanitizes the pending buffers before the flush timer starts.
+  if (!initialized || domainDisallowed) return;
+
+  const promises: Promise<unknown>[] = [];
+  if (consolePending.length > 0) {
+    const batch = consolePending;
+    consolePending = [];
+    promises.push(
+      chrome.runtime
+        .sendMessage({
+          type: 'CAPTURE_APPEND_CONSOLE',
+          entries: batch,
+          maxEntries: activeMaxConsoleEntries,
+        })
+        .catch(suppressTeardownErrors),
+    );
+  }
+  if (networkPending.length > 0) {
+    const batch = networkPending;
+    networkPending = [];
+    promises.push(
+      chrome.runtime
+        .sendMessage({
+          type: 'CAPTURE_APPEND_NETWORK',
+          entries: batch,
+          maxEntries: activeMaxNetworkEntries,
+        })
+        .catch(suppressTeardownErrors),
+    );
+  }
+  await Promise.all(promises);
 }
 
 // Start listening for main-world postMessage events IMMEDIATELY — before
@@ -186,17 +230,17 @@ async function init() {
   const settings = await getSettings();
 
   if (!isDomainAllowed(settings.allowedDomains)) {
-    // Domain not allowed — discard any events buffered during the async gap
-    // and prevent the listener from accepting new events
+    // Domain not allowed — discard anything that landed in pending during
+    // the async gap and prevent the listener from accepting new events.
     domainDisallowed = true;
-    consoleBuffer = new CircularBuffer<ConsoleEntry>(DEFAULT_CONSOLE_SIZE);
-    networkBuffer = new CircularBuffer<NetworkEntry>(DEFAULT_NETWORK_SIZE);
+    consolePending = [];
+    networkPending = [];
     return;
   }
 
   const sanitizationPatterns = settings.sanitizationPatterns as PIIPatternName[] | undefined;
-  const maxConsoleEntries = settings.maxConsoleEntries;
-  const maxNetworkEntries = settings.maxNetworkEntries;
+  activeMaxConsoleEntries = settings.maxConsoleEntries;
+  activeMaxNetworkEntries = settings.maxNetworkEntries;
   const replayEnabled = settings.replayEnabled;
   const replayInputMasking = settings.replayInputMasking;
 
@@ -205,25 +249,22 @@ async function init() {
     patterns: sanitizationPatterns,
   });
 
-  // Drain early-buffered entries, create correctly-sized buffers,
-  // and re-add entries (sanitizing them if sanitization is enabled).
-  const earlyConsole = consoleBuffer.getAll();
-  const earlyNetwork = networkBuffer.getAll();
-
-  consoleBuffer = new CircularBuffer<ConsoleEntry>(maxConsoleEntries);
-  for (const entry of earlyConsole) {
-    consoleBuffer.add(
-      settings.sanitizationEnabled ? (sanitizer.sanitize(entry) as ConsoleEntry) : entry,
-    );
+  // Retroactively sanitize anything the postMessage listener buffered before
+  // the sanitizer was ready. Critical: the flush interval below MUST NOT
+  // start until this drain completes — otherwise an unsanitized batch could
+  // get streamed to the SW.
+  if (settings.sanitizationEnabled) {
+    consolePending = consolePending.map((e) => sanitizer!.sanitize(e) as ConsoleEntry);
+    networkPending = networkPending.map((e) => sanitizer!.sanitize(e) as NetworkEntry);
   }
 
-  networkBuffer = new CircularBuffer<NetworkEntry>(maxNetworkEntries);
-  for (const entry of earlyNetwork) {
-    networkBuffer.add(
-      settings.sanitizationEnabled ? (sanitizer.sanitize(entry) as NetworkEntry) : entry,
-    );
-  }
   initialized = true;
+
+  // Start periodic flush of console + network batches to the SW. The SW
+  // maintains the authoritative per-tab buffer so logs survive navigations.
+  // The interval handle is intentionally not retained — the page lifetime
+  // owns it, and pagehide force-flushes the final batch.
+  setInterval(flushCapturePending, CAPTURE_FLUSH_INTERVAL_MS);
 
   // Start session replay if enabled (pass sanitizer for PII masking).
   // Events are streamed in batches to the service worker which persists them
@@ -260,12 +301,15 @@ function streamReplayBatchToSW(batch: ReplayEvent[]): void {
   });
 }
 
-// Flush any in-flight batch as the page is being torn down (navigation or tab
-// close). `pagehide` fires reliably across both bfcache and unload paths;
+// Flush any in-flight batches as the page is being torn down (navigation or
+// tab close). `pagehide` fires reliably across both bfcache and unload paths;
 // `beforeunload` would break bfcache, so we avoid it.
 window.addEventListener('pagehide', () => {
-  if (!isRecording()) return;
-  forceFlushReplayBatch();
+  if (isRecording()) forceFlushReplayBatch();
+  // Fire-and-forget — the page is being torn down, we can't actually wait
+  // for the SW to ack. The sendMessage call inside still has a chance to
+  // be delivered before the content-script context dies.
+  void flushCapturePending();
 });
 
 init().catch((err) => {
@@ -287,14 +331,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_CAPTURE_DATA') {
-    sendResponse({
-      type: 'CAPTURE_DATA',
-      data: {
-        console: getConsoleLogs(),
-        network: getNetworkRequests(),
-        metadata: captureMetadata(sanitizer ?? undefined),
-      },
-    });
+    // Flush whatever console / network entries haven't been pushed yet, then
+    // pull the full per-tab buffer from the SW (which has accumulated entries
+    // across any prior navigations within this tab). The await is critical —
+    // without it CAPTURE_GET_ALL can reach the SW before the pending APPEND
+    // messages, and the most recent logs would be missing from the report.
+    (async () => {
+      try {
+        await flushCapturePending();
+        const response = (await chrome.runtime.sendMessage({ type: 'CAPTURE_GET_ALL' })) as
+          | { console: ConsoleEntry[]; network: NetworkEntry[] }
+          | undefined;
+        sendResponse({
+          type: 'CAPTURE_DATA',
+          data: {
+            console: response?.console ?? [],
+            network: response?.network ?? [],
+            metadata: captureMetadata(sanitizer ?? undefined),
+          },
+        });
+      } catch (err) {
+        console.error('[BugSpotter] CAPTURE_GET_ALL roundtrip failed:', err);
+        sendResponse({
+          type: 'CAPTURE_DATA',
+          data: {
+            console: [],
+            network: [],
+            metadata: captureMetadata(sanitizer ?? undefined),
+          },
+        });
+      }
+    })();
     return true;
   }
 
@@ -322,8 +389,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       type: 'DIAGNOSTICS',
       data: {
         initialized,
-        consoleCount: consoleBuffer?.getAll().length ?? 0,
-        networkCount: networkBuffer?.getAll().length ?? 0,
+        consoleCount: consolePending.length,
+        networkCount: networkPending.length,
         replayCount: getPendingBatchSize(),
         replayRecording: isRecording(),
       },

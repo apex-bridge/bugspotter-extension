@@ -126,5 +126,9 @@ export type MessageType =
   | { type: 'REPLAY_APPEND'; events: unknown[] }
   | { type: 'REPLAY_GET_ALL'; tabId?: number }
   | { type: 'REPLAY_CLEAR'; tabId?: number }
+  | { type: 'CAPTURE_APPEND_CONSOLE'; entries: ConsoleEntry[]; maxEntries: number }
+  | { type: 'CAPTURE_APPEND_NETWORK'; entries: NetworkEntry[]; maxEntries: number }
+  | { type: 'CAPTURE_GET_ALL'; tabId?: number }
+  | { type: 'CAPTURE_CLEAR'; tabId?: number }
   | { type: 'GET_PENDING_SCREENSHOT' }
   | { type: 'GET_OFFLINE_QUEUE_SIZE' };
