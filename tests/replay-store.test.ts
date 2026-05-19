@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ReplayEvent } from '@bugspotter/common';
 import {
+  __testing,
   appendReplay,
   clearReplay,
   getReplay,
@@ -146,6 +147,37 @@ describe('replay-store', () => {
       await Promise.all([p1, p2]);
       const out = await getReplay(7);
       expect(out.map((e) => e.type)).toEqual([META, FULL_SNAPSHOT]);
+    });
+
+    it('getReplay waits for a pending append before reading (no stale reads)', async () => {
+      // Mirrors the submit-path flow in content-main.ts: a fire-and-forget
+      // append followed immediately by a read. Without queueing the read,
+      // chrome.storage.session.set hasn't run yet when get() executes.
+      const now = Date.now();
+      const appendPromise = appendReplay(7, [ev(FULL_SNAPSHOT, now)]);
+      const readPromise = getReplay(7); // fired before append resolves
+      const [, events] = await Promise.all([appendPromise, readPromise]);
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe(FULL_SNAPSHOT);
+    });
+
+    it('writeQueues releases the per-tab entry once its chain settles', async () => {
+      expect(__testing.writeQueues.size).toBe(0);
+      await appendReplay(7, [ev(FULL_SNAPSHOT, Date.now())]);
+      await clearReplay(7);
+      // Flush microtasks so the .finally() cleanup callback runs
+      await new Promise((r) => setTimeout(r, 0));
+      expect(__testing.writeQueues.has(7)).toBe(false);
+    });
+
+    it('writeQueues keeps the entry while ops for that tab are still pending', async () => {
+      const now = Date.now();
+      // Don't await — chain should still be in the map mid-flight
+      const p = appendReplay(7, [ev(FULL_SNAPSHOT, now)]);
+      expect(__testing.writeQueues.has(7)).toBe(true);
+      await p;
+      await new Promise((r) => setTimeout(r, 0));
+      expect(__testing.writeQueues.has(7)).toBe(false);
     });
 
     it('halves the buffer and retries when storage quota is exceeded', async () => {

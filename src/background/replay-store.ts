@@ -56,27 +56,41 @@ export function pruneEvents(events: ReplayEvent[], windowSeconds: number): Repla
   return firstValidIndex === 0 ? events : events.slice(firstValidIndex);
 }
 
-// Per-tab promise chain for serializing writes. Different tabIds proceed in
-// parallel; same tabId queues sequentially. Reset on SW eviction — acceptable
-// because each message handler awaits its enqueued op before responding.
+// Per-tab promise chain for serializing reads and writes. Different tabIds
+// proceed in parallel; same tabId queues sequentially so a getReplay can't
+// observe state from before a still-pending appendReplay. Reset on SW
+// eviction — acceptable because each message handler awaits its enqueued op
+// before responding. Entries are removed when their chain settles, so the
+// Map can't accumulate over long browser sessions.
 const writeQueues = new Map<number, Promise<unknown>>();
 
 function enqueue<T>(tabId: number, fn: () => Promise<T>): Promise<T> {
   const prev = (writeQueues.get(tabId) ?? Promise.resolve()) as Promise<unknown>;
   const next = prev.then(fn, fn);
-  writeQueues.set(
-    tabId,
-    next.catch(() => {}),
-  );
+  const handle = next
+    .catch(() => {})
+    .finally(() => {
+      // Only delete if no newer enqueue has replaced us — otherwise we'd
+      // orphan a still-active chain.
+      if (writeQueues.get(tabId) === handle) {
+        writeQueues.delete(tabId);
+      }
+    });
+  writeQueues.set(tabId, handle);
   return next as Promise<T>;
 }
 
 export async function getReplay(tabId: number): Promise<ReplayEvent[]> {
-  const key = keyFor(tabId);
-  const stored = await chrome.storage.session.get(key);
-  const events = (stored[key] as ReplayEvent[] | undefined) ?? [];
-  return events;
+  return enqueue(tabId, async () => {
+    const key = keyFor(tabId);
+    const stored = await chrome.storage.session.get(key);
+    return (stored[key] as ReplayEvent[] | undefined) ?? [];
+  });
 }
+
+// Test-only escape hatch: lets tests assert that the writeQueues Map cleans
+// itself up after settling. Not part of the public API.
+export const __testing = { writeQueues };
 
 export async function appendReplay(tabId: number, events: ReplayEvent[]): Promise<void> {
   if (events.length === 0) return;

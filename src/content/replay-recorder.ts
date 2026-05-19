@@ -120,15 +120,19 @@ export function stopReplayRecording(): void {
     pendingAbort.abort();
     pendingAbort = null;
   }
+  // Stop rrweb first so its emit can no longer feed pendingBatch after the
+  // final flush. Otherwise events emitted during teardown (e.g. mutation
+  // observer callbacks already queued) would land in the batch with no
+  // future flush to deliver them.
+  if (stopFn) {
+    stopFn();
+    stopFn = null;
+  }
   if (flushTimer) {
     clearInterval(flushTimer);
     flushTimer = null;
   }
   flushBatchToSink();
-  if (stopFn) {
-    stopFn();
-    stopFn = null;
-  }
 }
 
 /**
