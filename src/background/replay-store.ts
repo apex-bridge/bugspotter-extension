@@ -11,6 +11,9 @@
  */
 
 import type { ReplayEvent } from '@bugspotter/common';
+import { resolveTabId } from './resolve-tab-id';
+
+export { resolveTabId };
 
 const KEY_PREFIX = 'bs_replay_';
 const DEFAULT_WINDOW_SECONDS = 180;
@@ -148,26 +151,6 @@ export async function clearReplay(tabId: number): Promise<void> {
   await enqueue(tabId, async () => {
     await chrome.storage.session.remove(keyFor(tabId));
   });
-}
-
-/**
- * Resolve which tab a replay message targets.
- *
- * Sender precedence is critical for security: a content script can forge
- * `message.tabId`, but never `sender.tab.id` (the browser sets that). So when
- * the message arrives from a tab, that tab's id always wins. Only messages
- * from internal contexts (popup, options) — where `sender.tab` is undefined —
- * may pass an explicit `fallback`. The last-resort active-tab query uses
- * `lastFocusedWindow: true` because `currentWindow: true` is undefined in MV3
- * service workers.
- */
-export function resolveTabId(
-  sender: chrome.runtime.MessageSender,
-  fallback?: number,
-): Promise<number | undefined> {
-  if (sender.tab?.id !== undefined) return Promise.resolve(sender.tab.id);
-  if (typeof fallback === 'number') return Promise.resolve(fallback);
-  return chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => tabs[0]?.id);
 }
 
 interface ReplayMessage {
