@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS: Settings = {
   sanitizationEnabled: true,
   sanitizationPatterns: getAllPatternNames(),
   replayEnabled: false,
+  replayInputMasking: 'all',
   maxConsoleEntries: 100,
   maxNetworkEntries: 50,
 };

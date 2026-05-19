@@ -198,6 +198,7 @@ async function init() {
   const maxConsoleEntries = settings.maxConsoleEntries;
   const maxNetworkEntries = settings.maxNetworkEntries;
   const replayEnabled = settings.replayEnabled;
+  const replayInputMasking = settings.replayInputMasking;
 
   sanitizer = createSanitizer({
     enabled: settings.sanitizationEnabled,
@@ -234,6 +235,7 @@ async function init() {
     try {
       startReplayRecording({
         sanitizer: sanitizer ?? undefined,
+        inputMasking: replayInputMasking,
         onBatch: streamReplayBatchToSW,
       });
     } catch (err) {
@@ -330,11 +332,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'START_REPLAY') {
-    startReplayRecording({
-      sanitizer: sanitizer ?? undefined,
-      onBatch: streamReplayBatchToSW,
+    // Re-read settings each time so a manual restart picks up any masking
+    // change the user made in the options page after init() ran.
+    (async () => {
+      const current = await getSettings();
+      startReplayRecording({
+        sanitizer: sanitizer ?? undefined,
+        inputMasking: current.replayInputMasking,
+        onBatch: streamReplayBatchToSW,
+      });
+      sendResponse({ success: true });
+    })().catch((err) => {
+      console.error('[BugSpotter] START_REPLAY failed:', err);
+      sendResponse({ success: false });
     });
-    sendResponse({ success: true });
     return true;
   }
 
