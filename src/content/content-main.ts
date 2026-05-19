@@ -1,10 +1,11 @@
 import {
   startReplayRecording,
   stopReplayRecording,
-  getReplayEvents,
-  getReplayEventCount,
+  forceFlushReplayBatch,
+  getPendingBatchSize,
   isRecording,
 } from './replay-recorder';
+import type { ReplayEvent } from '@bugspotter/common';
 import { captureMetadata } from './metadata';
 import {
   CircularBuffer,
@@ -223,15 +224,47 @@ async function init() {
   }
   initialized = true;
 
-  // Start session replay if enabled (pass sanitizer for PII masking)
+  // Start session replay if enabled (pass sanitizer for PII masking).
+  // Events are streamed in batches to the service worker which persists them
+  // in chrome.storage.session (keyed per tab). This makes the replay survive
+  // full-page navigations — a fresh content-script instance on the new URL
+  // appends to the same per-tab buffer, and the viewer stitches segments
+  // together via the FullSnapshot markers rrweb emits at each `record()` start.
   if (replayEnabled) {
     try {
-      startReplayRecording(60, sanitizer ?? undefined);
+      startReplayRecording({
+        sanitizer: sanitizer ?? undefined,
+        onBatch: streamReplayBatchToSW,
+      });
     } catch (err) {
       console.error('[BugSpotter] Failed to start replay recording:', err);
     }
   }
 }
+
+// Fire-and-forget batch sink. The SW write queue serializes ordering per-tab,
+// so we never need to await. Errors are logged unless they're the expected
+// navigation-teardown noise (extension context torn down before the message
+// could be delivered).
+function streamReplayBatchToSW(batch: ReplayEvent[]): void {
+  chrome.runtime.sendMessage({ type: 'REPLAY_APPEND', events: batch }).catch((err) => {
+    if (
+      !String(err?.message ?? err).match(
+        /Extension context invalidated|Receiving end does not exist/i,
+      )
+    ) {
+      console.warn('[BugSpotter] REPLAY_APPEND failed:', err);
+    }
+  });
+}
+
+// Flush any in-flight batch as the page is being torn down (navigation or tab
+// close). `pagehide` fires reliably across both bfcache and unload paths;
+// `beforeunload` would break bfcache, so we avoid it.
+window.addEventListener('pagehide', () => {
+  if (!isRecording()) return;
+  forceFlushReplayBatch();
+});
 
 init().catch((err) => {
   // Do not start captures on init failure — sanitizer and domain allowlist
@@ -264,10 +297,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_REPLAY_EVENTS') {
-    sendResponse({
-      type: 'REPLAY_EVENTS',
-      data: getReplayEvents(),
-    });
+    // Flush whatever batched events haven't been pushed yet, then fetch the
+    // full per-tab buffer from the SW (which has accumulated events across
+    // any prior navigations within this tab).
+    (async () => {
+      try {
+        forceFlushReplayBatch();
+        const response = (await chrome.runtime.sendMessage({ type: 'REPLAY_GET_ALL' })) as
+          | { events: unknown[] }
+          | undefined;
+        sendResponse({ type: 'REPLAY_EVENTS', data: response?.events ?? [] });
+      } catch (err) {
+        console.error('[BugSpotter] REPLAY_GET_ALL roundtrip failed:', err);
+        sendResponse({ type: 'REPLAY_EVENTS', data: [] });
+      }
+    })();
     return true;
   }
 
@@ -278,7 +322,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         initialized,
         consoleCount: consoleBuffer?.getAll().length ?? 0,
         networkCount: networkBuffer?.getAll().length ?? 0,
-        replayCount: getReplayEventCount(),
+        replayCount: getPendingBatchSize(),
         replayRecording: isRecording(),
       },
     });
@@ -286,7 +330,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'START_REPLAY') {
-    startReplayRecording(60, sanitizer ?? undefined);
+    startReplayRecording({
+      sanitizer: sanitizer ?? undefined,
+      onBatch: streamReplayBatchToSW,
+    });
     sendResponse({ success: true });
     return true;
   }

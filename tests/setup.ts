@@ -15,9 +15,24 @@ const chrome = {
       }),
     },
     session: {
-      get: vi.fn((key: string) => Promise.resolve({ [key]: sessionData[key] })),
+      get: vi.fn((key: string | string[] | null) => {
+        if (key === null) {
+          return Promise.resolve({ ...sessionData });
+        }
+        if (Array.isArray(key)) {
+          const result: Record<string, unknown> = {};
+          for (const k of key) result[k] = sessionData[k];
+          return Promise.resolve(result);
+        }
+        return Promise.resolve({ [key]: sessionData[key] });
+      }),
       set: vi.fn((items: Record<string, unknown>) => {
         Object.assign(sessionData, items);
+        return Promise.resolve();
+      }),
+      remove: vi.fn((key: string | string[]) => {
+        const keys = Array.isArray(key) ? key : [key];
+        for (const k of keys) delete sessionData[k];
         return Promise.resolve();
       }),
     },

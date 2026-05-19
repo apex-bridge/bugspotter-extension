@@ -108,6 +108,12 @@ export function useSubmitReport(args: SubmitReportArgs) {
       });
 
       if (response.success) {
+        // Clear the cross-navigation replay buffer so the next report starts
+        // from a clean slate. Failures here are non-fatal — stale events would
+        // age out via the 180s window in the SW prune anyway.
+        if (tabId) {
+          chrome.runtime.sendMessage({ type: 'REPLAY_CLEAR', tabId }).catch(() => {});
+        }
         setStatus('success');
       } else {
         setStatus('error');
