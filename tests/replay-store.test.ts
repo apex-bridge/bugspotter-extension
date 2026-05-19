@@ -281,25 +281,6 @@ describe('replay-store', () => {
       expect(handleReplayMessage({ type: 'SOMETHING_ELSE' }, sender(1), () => {})).toBe(false);
     });
 
-    it('REPLAY_PRELOAD returns events for the sender tab', async () => {
-      const now = Date.now();
-      await appendReplay(7, [ev(FULL_SNAPSHOT, now)]);
-      const { promise, cb } = awaitResponse();
-      const handled = handleReplayMessage({ type: 'REPLAY_PRELOAD' }, sender(7), cb);
-      expect(handled).toBe(true);
-      const resp = (await promise) as { events: ReplayEvent[] };
-      expect(resp.events).toHaveLength(1);
-      expect(resp.events[0].type).toBe(FULL_SNAPSHOT);
-    });
-
-    it('REPLAY_PRELOAD without sender.tab returns empty (no fallback)', async () => {
-      const { promise, cb } = awaitResponse();
-      handleReplayMessage({ type: 'REPLAY_PRELOAD', tabId: 7 }, sender(), cb);
-      expect(await promise).toEqual({ events: [] });
-      // PRELOAD/APPEND only trust sender.tab — never the active-tab fallback.
-      expect(mockChrome.tabs.query).not.toHaveBeenCalled();
-    });
-
     it('REPLAY_APPEND ignores message.tabId and writes to sender.tab', async () => {
       const now = Date.now();
       const { promise, cb } = awaitResponse();

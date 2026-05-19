@@ -110,7 +110,6 @@ export type MessageType =
   | { type: 'REPLAY_EVENTS'; data: unknown[] }
   | { type: 'START_REPLAY' }
   | { type: 'STOP_REPLAY' }
-  | { type: 'REPLAY_PRELOAD' }
   | { type: 'REPLAY_APPEND'; events: unknown[] }
   | { type: 'REPLAY_GET_ALL'; tabId?: number }
   | { type: 'REPLAY_CLEAR'; tabId?: number }

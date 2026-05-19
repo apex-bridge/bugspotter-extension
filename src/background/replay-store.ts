@@ -184,21 +184,6 @@ export function handleReplayMessage(
   sendResponse: (response: unknown) => void,
 ): boolean {
   switch (message?.type) {
-    case 'REPLAY_PRELOAD': {
-      const tabId = sender.tab?.id;
-      if (typeof tabId !== 'number') {
-        sendResponse({ events: [] });
-        return true;
-      }
-      getReplay(tabId)
-        .then((events) => sendResponse({ events }))
-        .catch((err) => {
-          console.error('[BugSpotter] REPLAY_PRELOAD failed:', err);
-          sendResponse({ events: [] });
-        });
-      return true;
-    }
-
     case 'REPLAY_APPEND': {
       const tabId = sender.tab?.id;
       if (typeof tabId !== 'number') {
