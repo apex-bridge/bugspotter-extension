@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getSettings, saveSettings, DEMO_INSTANCE } from '@/storage/settings';
 import { validateConnection } from '@/api/bugspotter-client';
+import type { Settings } from '@/types';
 import {
   getAllPatternNames,
   PATTERN_PRESETS,
@@ -43,6 +44,8 @@ export function Options() {
   const [sanitizationEnabled, setSanitizationEnabled] = useState(true);
   const [sanitizationPatterns, setSanitizationPatterns] = useState<string[]>(ALL_PATTERNS);
   const [replayEnabled, setReplayEnabled] = useState(false);
+  const [replayInputMasking, setReplayInputMasking] =
+    useState<Settings['replayInputMasking']>('all');
   const [maxConsoleEntries, setMaxConsoleEntries] = useState(100);
   const [maxNetworkEntries, setMaxNetworkEntries] = useState(50);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'demo-connecting'>(
@@ -64,6 +67,7 @@ export function Options() {
       setSanitizationEnabled(s.sanitizationEnabled);
       setSanitizationPatterns(s.sanitizationPatterns);
       setReplayEnabled(s.replayEnabled);
+      setReplayInputMasking(s.replayInputMasking);
       setMaxConsoleEntries(s.maxConsoleEntries);
       setMaxNetworkEntries(s.maxNetworkEntries);
     });
@@ -108,6 +112,7 @@ export function Options() {
       sanitizationEnabled,
       sanitizationPatterns,
       replayEnabled,
+      replayInputMasking,
       maxConsoleEntries,
       maxNetworkEntries,
     });
@@ -124,6 +129,7 @@ export function Options() {
       sanitizationEnabled,
       sanitizationPatterns,
       replayEnabled,
+      replayInputMasking,
       maxConsoleEntries,
       maxNetworkEntries,
     });
@@ -142,6 +148,7 @@ export function Options() {
       sanitizationEnabled,
       sanitizationPatterns,
       replayEnabled: true,
+      replayInputMasking,
       maxConsoleEntries,
       maxNetworkEntries,
     };
@@ -331,9 +338,30 @@ export function Options() {
               <span className="text-sm">Enable session replay recording</span>
             </label>
             {replayEnabled && (
-              <p className="text-xs text-yellow-400 mt-1 ml-5">
-                Session replay may slightly impact page performance.
-              </p>
+              <>
+                <p className="text-xs text-yellow-400 mt-1 ml-5">
+                  Session replay may slightly impact page performance.
+                </p>
+                <div className="mt-3 ml-5">
+                  <label className="block text-xs text-gray-400 mb-1">Input value masking</label>
+                  <select
+                    value={replayInputMasking}
+                    onChange={(e) =>
+                      setReplayInputMasking(e.target.value as Settings['replayInputMasking'])
+                    }
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm"
+                  >
+                    <option value="all">Mask all input values (safest)</option>
+                    <option value="pii-only">
+                      PII-only — show search/filter, mask emails/phones
+                    </option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    'all' replaces every input value with asterisks. 'pii-only' keeps non-sensitive
+                    text readable in the replay; password fields are always masked.
+                  </p>
+                </div>
+              </>
             )}
           </section>
 

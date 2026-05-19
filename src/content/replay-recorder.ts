@@ -15,6 +15,7 @@
 
 import { record } from 'rrweb';
 import type { ReplayEvent, Sanitizer } from '@bugspotter/common';
+import type { ReplayInputMasking } from '@/types';
 
 // Each flush triggers a read-modify-write of the full per-tab buffer in
 // chrome.storage.session. At a full 180s window the buffer can reach hundreds
@@ -26,6 +27,7 @@ const BATCH_FLUSH_INTERVAL_MS = 5000;
 let stopFn: (() => void) | null = null;
 let pendingAbort: AbortController | null = null;
 let activeSanitizer: Sanitizer | null = null;
+let activeInputMasking: ReplayInputMasking = 'all';
 let pendingBatch: ReplayEvent[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let onBatchCallback: ((batch: ReplayEvent[]) => void) | null = null;
@@ -56,7 +58,34 @@ function beginRecording(): void {
         pendingBatch.push(event as ReplayEvent);
       },
       blockClass: 'bugspotter-ignore',
-      maskAllInputs: true,
+      // Input masking strategy is user-configurable via Settings:
+      //  - 'all'      → mask every input value (privacy-safe default; rrweb
+      //                 default behavior). Password-type inputs are masked
+      //                 either way, so maskInputOptions is redundant here.
+      //  - 'pii-only' → only password-type inputs are auto-masked; other
+      //                 values pass through the PII sanitizer so search and
+      //                 filter fields stay readable while emails / phones /
+      //                 etc. still get redacted by pattern.
+      //
+      // If 'pii-only' was requested but the sanitizer init failed, fall back
+      // to masking everything — better to lose search-field visibility than
+      // to leak PII via inputs because the sanitizer couldn't load.
+      maskAllInputs:
+        activeInputMasking === 'all' || (activeInputMasking === 'pii-only' && !activeSanitizer),
+      maskInputOptions: activeInputMasking === 'pii-only' ? { password: true } : undefined,
+      maskInputFn:
+        activeInputMasking === 'pii-only' && activeSanitizer
+          ? (text: string, element: HTMLElement | null) => {
+              // Defense-in-depth: when maskInputFn is set it can override
+              // rrweb's maskInputOptions.password handling, so re-check the
+              // element type ourselves. The PII sanitizer alone is not enough
+              // — passwords often don't match any PII pattern.
+              if (element instanceof HTMLInputElement && element.type === 'password') {
+                return '*'.repeat(text.length);
+              }
+              return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
+            }
+          : undefined,
       // PII sanitization for text content in DOM snapshots
       maskTextFn: activeSanitizer
         ? (text: string, element: HTMLElement | null) => {
@@ -89,6 +118,8 @@ function beginRecording(): void {
 
 export interface StartReplayOptions {
   sanitizer?: Sanitizer;
+  /** Input masking strategy. Defaults to 'all' (rrweb's privacy-safe default). */
+  inputMasking?: ReplayInputMasking;
   /**
    * Called with each batch of events. The sink owns persistence — typically
    * forwards to the service worker which writes to chrome.storage.session.
@@ -101,6 +132,10 @@ export function startReplayRecording(options: StartReplayOptions): void {
   if (stopFn || pendingAbort) return; // already recording or pending
 
   if (options.sanitizer) activeSanitizer = options.sanitizer;
+  // Only overwrite when explicitly provided so callers that don't carry the
+  // setting (e.g. the START_REPLAY message handler) preserve the value set
+  // during init().
+  if (options.inputMasking) activeInputMasking = options.inputMasking;
   onBatchCallback = options.onBatch;
 
   // rrweb needs at least document.documentElement to take a snapshot.

@@ -71,6 +71,8 @@ export interface Project {
   name: string;
 }
 
+export type ReplayInputMasking = 'all' | 'pii-only';
+
 export interface Settings {
   baseUrl: string;
   apiKey: string;
@@ -78,6 +80,17 @@ export interface Settings {
   sanitizationEnabled: boolean;
   sanitizationPatterns: string[];
   replayEnabled: boolean;
+  /**
+   * How aggressively to mask values typed into input/textarea/select during
+   * replay capture.
+   * - 'all'      → every input value replaced with asterisks (rrweb default,
+   *                safest, hides search/filter queries too).
+   * - 'pii-only' → only password-type inputs are masked unconditionally;
+   *                other input values are routed through the PII sanitizer,
+   *                so emails / phones / etc. are still redacted by pattern
+   *                but search queries stay readable in the replay.
+   */
+  replayInputMasking: ReplayInputMasking;
   maxConsoleEntries: number;
   maxNetworkEntries: number;
 }
