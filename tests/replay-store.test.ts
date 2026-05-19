@@ -193,6 +193,47 @@ describe('replay-store', () => {
       const stored = retryArgs['bs_replay_7'] as ReplayEvent[];
       expect(stored.length).toBeLessThan(events.length);
     });
+
+    it('quota recovery preserves the latest FullSnapshot + preceding Meta', async () => {
+      // Buffer shape: [old incrementals…, Meta, FullSnapshot, new incrementals…]
+      // A naive slice from the middle would drop the FullSnapshot and leave
+      // rrweb-player with orphan incrementals.
+      const now = Date.now();
+      const events: ReplayEvent[] = [
+        ...Array.from({ length: 5 }, (_, i) => ev(INCREMENTAL, now + i)),
+        ev(META, now + 100),
+        ev(FULL_SNAPSHOT, now + 101),
+        ...Array.from({ length: 5 }, (_, i) => ev(INCREMENTAL, now + 200 + i)),
+      ];
+      mockChrome.storage.session.set
+        .mockRejectedValueOnce(new Error('QUOTA_BYTES quota exceeded'))
+        .mockResolvedValueOnce(undefined);
+      await appendReplay(7, events);
+      const retryArgs = mockChrome.storage.session.set.mock.calls[1][0];
+      const stored = retryArgs['bs_replay_7'] as ReplayEvent[];
+      // The Meta+FullSnap pair must survive
+      expect(stored[0].type).toBe(META);
+      expect(stored[1].type).toBe(FULL_SNAPSHOT);
+      // And the leading orphan incrementals are gone
+      expect(stored.every((e) => e.timestamp >= now + 100)).toBe(true);
+    });
+
+    it('quota recovery keeps the head when FullSnapshot is already at index 0', async () => {
+      const now = Date.now();
+      const events: ReplayEvent[] = [
+        ev(FULL_SNAPSHOT, now),
+        ...Array.from({ length: 6 }, (_, i) => ev(INCREMENTAL, now + 1 + i)),
+      ];
+      mockChrome.storage.session.set
+        .mockRejectedValueOnce(new Error('QUOTA_BYTES quota exceeded'))
+        .mockResolvedValueOnce(undefined);
+      await appendReplay(7, events);
+      const retryArgs = mockChrome.storage.session.set.mock.calls[1][0];
+      const stored = retryArgs['bs_replay_7'] as ReplayEvent[];
+      // FullSnap survives, trailing incrementals are halved
+      expect(stored[0].type).toBe(FULL_SNAPSHOT);
+      expect(stored.length).toBeLessThan(events.length);
+    });
   });
 
   describe('resolveTabId', () => {

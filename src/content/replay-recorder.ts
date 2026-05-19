@@ -16,7 +16,12 @@
 import { record } from 'rrweb';
 import type { ReplayEvent, Sanitizer } from '@bugspotter/common';
 
-const BATCH_FLUSH_INTERVAL_MS = 1000;
+// Each flush triggers a read-modify-write of the full per-tab buffer in
+// chrome.storage.session. At a full 180s window the buffer can reach hundreds
+// of KB, so a sub-second cadence wastes I/O. 5s caps the worst-case data loss
+// (sudden tab crash before the next flush) at ~5s of recording — pagehide
+// and the submit path both force-flush explicitly.
+const BATCH_FLUSH_INTERVAL_MS = 5000;
 
 let stopFn: (() => void) | null = null;
 let pendingAbort: AbortController | null = null;

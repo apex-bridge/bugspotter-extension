@@ -103,14 +103,41 @@ export async function appendReplay(tabId: number, events: ReplayEvent[]): Promis
     try {
       await chrome.storage.session.set({ [key]: pruned });
     } catch (err) {
-      // Quota exceeded — drop the oldest half and retry once. rrweb FullSnapshot
-      // can be hundreds of KB on heavy pages; storage.session has a ~10MB cap.
-      console.warn('[BugSpotter] replay storage write failed, halving buffer:', err);
-      const halved = pruned.slice(Math.floor(pruned.length / 2));
-      const reduced = pruneEvents(halved, DEFAULT_WINDOW_SECONDS);
+      // Quota exceeded — recover by dropping events while preserving the
+      // anchor (latest FullSnapshot + preceding Meta). A blind slice from the
+      // middle would orphan incrementals and make the replay unplayable.
+      console.warn('[BugSpotter] replay storage write failed, recovering:', err);
+      const reduced = halveAroundSnapshot(pruned);
       await chrome.storage.session.set({ [key]: reduced }).catch(() => {});
     }
   });
+}
+
+function halveAroundSnapshot(events: ReplayEvent[]): ReplayEvent[] {
+  if (events.length === 0) return events;
+  let lastSnapIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === FULL_SNAPSHOT_TYPE) {
+      lastSnapIndex = i;
+      break;
+    }
+  }
+  // No anchor — replay is already unplayable; just halve to free space.
+  if (lastSnapIndex < 0) {
+    return events.slice(Math.floor(events.length / 2));
+  }
+  const protectedStart =
+    lastSnapIndex > 0 && events[lastSnapIndex - 1].type === META_TYPE
+      ? lastSnapIndex - 1
+      : lastSnapIndex;
+  // Snapshot mid-buffer: drop everything older than the anchor.
+  if (protectedStart > 0) {
+    return events.slice(protectedStart);
+  }
+  // Snapshot already at the head: keep it + halve the trailing incrementals.
+  const headLen = lastSnapIndex + 1;
+  const tail = events.slice(headLen);
+  return events.slice(0, headLen).concat(tail.slice(Math.floor(tail.length / 2)));
 }
 
 export async function clearReplay(tabId: number): Promise<void> {
