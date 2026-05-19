@@ -110,5 +110,8 @@ export type MessageType =
   | { type: 'REPLAY_EVENTS'; data: unknown[] }
   | { type: 'START_REPLAY' }
   | { type: 'STOP_REPLAY' }
+  | { type: 'REPLAY_APPEND'; events: unknown[] }
+  | { type: 'REPLAY_GET_ALL'; tabId?: number }
+  | { type: 'REPLAY_CLEAR'; tabId?: number }
   | { type: 'GET_PENDING_SCREENSHOT' }
   | { type: 'GET_OFFLINE_QUEUE_SIZE' };

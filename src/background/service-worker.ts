@@ -10,13 +10,16 @@ import { OfflineQueue } from '@/utils/offline-queue';
 import { getSettings } from '@/storage/settings';
 import { gzipCompress } from '@/utils/compress';
 import { isSecureEndpoint } from '@bugspotter/common';
+import { clearReplay, handleReplayMessage } from './replay-store';
 
 const PENDING_SCREENSHOT_KEY = 'bugspotter_pending_screenshot';
 
 const deduplicator = new BugReportDeduplicator();
 const offlineQueue = new OfflineQueue({ enabled: true, maxQueueSize: 10 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (handleReplayMessage(message, sender, sendResponse)) return true;
+
   if (message.type === 'CAPTURE_SCREENSHOT') {
     chrome.tabs
       .captureVisibleTab({ format: 'png' })
@@ -229,3 +232,10 @@ chrome.scripting
 
 // Set badge
 chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
+
+// Clean up per-tab replay storage when a tab closes. chrome.storage.session
+// itself only clears at end of browser session, so without this stale buffers
+// from closed tabs would accumulate until quota pressure kicks in.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearReplay(tabId).catch(() => {});
+});
