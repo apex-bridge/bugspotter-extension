@@ -234,6 +234,20 @@ describe('replay-store', () => {
       expect(stored[0].type).toBe(FULL_SNAPSHOT);
       expect(stored.length).toBeLessThan(events.length);
     });
+
+    it('quota recovery drops the single trailing event when tail.length === 1', async () => {
+      // Edge case: [FullSnap, Inc] — a naive floor(1/2) = 0 would return the
+      // original array unchanged, so the retry write hits the same quota.
+      const now = Date.now();
+      const events: ReplayEvent[] = [ev(FULL_SNAPSHOT, now), ev(INCREMENTAL, now + 1)];
+      mockChrome.storage.session.set
+        .mockRejectedValueOnce(new Error('QUOTA_BYTES quota exceeded'))
+        .mockResolvedValueOnce(undefined);
+      await appendReplay(7, events);
+      const retryArgs = mockChrome.storage.session.set.mock.calls[1][0];
+      const stored = retryArgs['bs_replay_7'] as ReplayEvent[];
+      expect(stored).toEqual([events[0]]);
+    });
   });
 
   describe('resolveTabId', () => {

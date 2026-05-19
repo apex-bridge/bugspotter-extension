@@ -135,9 +135,13 @@ function halveAroundSnapshot(events: ReplayEvent[]): ReplayEvent[] {
     return events.slice(protectedStart);
   }
   // Snapshot already at the head: keep it + halve the trailing incrementals.
+  // Math.max(1, …) guarantees we always drop at least one event when the tail
+  // is non-empty — otherwise a single-event tail would round down to 0 and we'd
+  // hand back an unchanged buffer, so the retry write fails the same way.
   const headLen = lastSnapIndex + 1;
   const tail = events.slice(headLen);
-  return events.slice(0, headLen).concat(tail.slice(Math.floor(tail.length / 2)));
+  if (tail.length === 0) return events;
+  return events.slice(0, headLen).concat(tail.slice(Math.max(1, Math.floor(tail.length / 2))));
 }
 
 export async function clearReplay(tabId: number): Promise<void> {
