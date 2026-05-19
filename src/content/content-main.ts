@@ -234,26 +234,28 @@ async function init() {
     try {
       startReplayRecording({
         sanitizer: sanitizer ?? undefined,
-        onBatch: (batch: ReplayEvent[]) => {
-          // Fire-and-forget — the SW write queue serializes ordering per-tab.
-          // Errors logged but never block recording.
-          chrome.runtime.sendMessage({ type: 'REPLAY_APPEND', events: batch }).catch((err) => {
-            // chrome.runtime errors are noisy during navigation teardown;
-            // only log if unexpected.
-            if (
-              !String(err?.message ?? err).match(
-                /Extension context invalidated|Receiving end does not exist/i,
-              )
-            ) {
-              console.warn('[BugSpotter] REPLAY_APPEND failed:', err);
-            }
-          });
-        },
+        onBatch: streamReplayBatchToSW,
       });
     } catch (err) {
       console.error('[BugSpotter] Failed to start replay recording:', err);
     }
   }
+}
+
+// Fire-and-forget batch sink. The SW write queue serializes ordering per-tab,
+// so we never need to await. Errors are logged unless they're the expected
+// navigation-teardown noise (extension context torn down before the message
+// could be delivered).
+function streamReplayBatchToSW(batch: ReplayEvent[]): void {
+  chrome.runtime.sendMessage({ type: 'REPLAY_APPEND', events: batch }).catch((err) => {
+    if (
+      !String(err?.message ?? err).match(
+        /Extension context invalidated|Receiving end does not exist/i,
+      )
+    ) {
+      console.warn('[BugSpotter] REPLAY_APPEND failed:', err);
+    }
+  });
 }
 
 // Flush any in-flight batch as the page is being torn down (navigation or tab
@@ -330,9 +332,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'START_REPLAY') {
     startReplayRecording({
       sanitizer: sanitizer ?? undefined,
-      onBatch: (batch: ReplayEvent[]) => {
-        chrome.runtime.sendMessage({ type: 'REPLAY_APPEND', events: batch }).catch(() => {});
-      },
+      onBatch: streamReplayBatchToSW,
     });
     sendResponse({ success: true });
     return true;
