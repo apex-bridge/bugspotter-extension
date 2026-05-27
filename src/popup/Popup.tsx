@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { BugReportForm } from './components/BugReportForm';
+import { DeflectionDisplay } from './components/DeflectionDisplay';
 import { SubmitButton } from './components/SubmitButton';
 import { DiagnosticsBar } from './components/DiagnosticsBar';
 import { usePopupInit } from './hooks/usePopupInit';
 import { useSubmitReport } from './hooks/useSubmitReport';
+import { useDeflection } from './hooks/useDeflection';
 
 export function Popup() {
   const [title, setTitle] = useState('');
@@ -13,12 +15,15 @@ export function Popup() {
   const { screenshot, setScreenshot, configured, replayEnabled, offlineCount, diagnostics } =
     usePopupInit();
 
+  const deflection = useDeflection();
+
   const { status, errorMsg, handleSubmit, resetStatus } = useSubmitReport({
     title,
     description,
     priority,
     screenshot,
     replayEnabled,
+    deflectedToCanonicalId: deflection.confirmedCanonicalId,
   });
 
   if (!configured) {
@@ -49,6 +54,7 @@ export function Popup() {
             setTitle('');
             setDescription('');
             setScreenshot(null);
+            deflection.reset();
           }}
           className="mt-3 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
         >
@@ -85,9 +91,21 @@ export function Popup() {
         title={title}
         description={description}
         priority={priority}
-        onTitleChange={setTitle}
+        onTitleChange={(v) => {
+          setTitle(v);
+          // Fire deflection probe on title change — the API debounces
+          // internally so we don't need to here.
+          void deflection.probe(v);
+        }}
         onDescriptionChange={setDescription}
         onPriorityChange={setPriority}
+      />
+
+      <DeflectionDisplay
+        matches={deflection.matches}
+        confirmedCanonicalId={deflection.confirmedCanonicalId}
+        onConfirm={deflection.confirm}
+        onReject={deflection.reject}
       />
 
       {screenshot && (
