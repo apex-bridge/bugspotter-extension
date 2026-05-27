@@ -100,14 +100,18 @@ export function useDeflection() {
       setMatches([]);
       return;
     }
+    // Stamp queryId BEFORE any await — otherwise a probe that fired
+    // while this one was awaiting ensureApi could bump the counter,
+    // and we'd assign a fresh queryId here that matches the new
+    // current value, causing stale matches to land on resolve.
+    const queryId = ++queryCountRef.current;
     const api = await ensureApi();
-    // Bail if the popup unmounted while we were awaiting settings —
-    // firing api.query() now would leak an HTTP request.
-    if (!api || !isMountedRef.current) {
+    // Bail if the popup unmounted, settings missing, or a newer
+    // probe has been issued while we were awaiting.
+    if (!api || !isMountedRef.current || queryId !== queryCountRef.current) {
       api?.cancel();
       return;
     }
-    const queryId = ++queryCountRef.current;
     try {
       const result = await api.query(trimmed);
       // Discard stale resolves — only the latest query's result
