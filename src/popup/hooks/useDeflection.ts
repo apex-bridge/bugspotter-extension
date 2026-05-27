@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DeflectionApi, type DeflectionMatch } from '@bugspotter/common';
 import { getSettings } from '@/storage/settings';
 
@@ -107,9 +107,13 @@ export function useDeflection() {
     const queryId = ++queryCountRef.current;
     const api = await ensureApi();
     // Bail if the popup unmounted, settings missing, or a newer
-    // probe has been issued while we were awaiting.
+    // probe has been issued while we were awaiting. No cancel() on
+    // the api here — we never started anything on this api, and
+    // cancelling would harm whatever the newer probe is about to
+    // do (api is shared via apiRef). DeflectionApi's internal
+    // supersession cleans up old state when the next valid probe
+    // calls api.query.
     if (!api || !isMountedRef.current || queryId !== queryCountRef.current) {
-      api?.cancel();
       return;
     }
     try {
@@ -158,7 +162,14 @@ export function useDeflection() {
     };
   }, []);
 
-  const visibleMatches = matches.filter((m) => !rejectedCanonicalIds.has(m.canonical_id));
+  // Memoize so the clear-stale-confirmation effect doesn't re-run
+  // on every render. A new array reference per render would make
+  // useEffect([visibleMatches, ...]) refire constantly while
+  // confirmedCanonicalId is set.
+  const visibleMatches = useMemo(
+    () => matches.filter((m) => !rejectedCanonicalIds.has(m.canonical_id)),
+    [matches, rejectedCanonicalIds],
+  );
 
   // If the user confirmed a chip and the next probe no longer
   // surfaces it (similarity dropped, top-N rotated, OR the user
