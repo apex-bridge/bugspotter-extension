@@ -177,6 +177,79 @@ describe('useDeflection', () => {
   }, 10000);
 
   // ─────────────────────────────────────────────────────────────
+  // Regression: confirmation persists for an invisible match
+  // (Gemini round 3). Previously, clicking "Same" on bug-1 then
+  // editing the title until bug-1 fell out of the top-N kept the
+  // confirmation in state — submit would carry a stale
+  // duplicate_of with no UI for the user to see or undo it.
+  // Matches the SDK widget's "clear-on-disappearance" contract.
+  // ─────────────────────────────────────────────────────────────
+  it('clears confirmedCanonicalId when the confirmed match drops out of results', async () => {
+    // First probe surfaces bug-1.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          success: true,
+          data: {
+            matches: [
+              {
+                canonical_id: 'bug-1',
+                title: 'Login broken',
+                status: 'open',
+                similarity: 0.91,
+              },
+            ],
+          },
+        }),
+    });
+
+    const { result } = renderHook(() => useDeflection());
+
+    await act(async () => {
+      await result.current.probe('login is broken');
+    });
+    expect(result.current.matches).toHaveLength(1);
+
+    // User confirms bug-1.
+    act(() => {
+      result.current.confirm('bug-1');
+    });
+    expect(result.current.confirmedCanonicalId).toBe('bug-1');
+
+    // Next probe returns a different match set without bug-1.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          success: true,
+          data: {
+            matches: [
+              {
+                canonical_id: 'bug-2',
+                title: 'Submit form 500s',
+                status: 'open',
+                similarity: 0.82,
+              },
+            ],
+          },
+        }),
+    });
+
+    await act(async () => {
+      await result.current.probe('something totally different now');
+    });
+
+    // bug-1 disappeared → confirmation must be cleared, otherwise
+    // submit would carry a stale duplicate_of the user can't see.
+    expect(result.current.confirmedCanonicalId).toBeNull();
+  });
+
+  // ─────────────────────────────────────────────────────────────
   // Regression: getSettings throw (Gemini round 2, finding 2).
   // chrome.storage can fail when the extension context is
   // invalidated mid-update. ensureApi awaited getSettings outside

@@ -160,6 +160,20 @@ export function useDeflection() {
 
   const visibleMatches = matches.filter((m) => !rejectedCanonicalIds.has(m.canonical_id));
 
+  // If the user confirmed a chip and the next probe no longer
+  // surfaces it (similarity dropped, top-N rotated, OR the user
+  // rejected it), clear the confirmation. Without this, submit
+  // would carry a stale duplicate_of for a match the user can no
+  // longer see — surprise behavior. Mirrors the SDK widget's
+  // DeflectionDisplay.render contract for cross-surface parity.
+  useEffect(() => {
+    if (!confirmedCanonicalId) return;
+    const stillVisible = visibleMatches.some((m) => m.canonical_id === confirmedCanonicalId);
+    if (!stillVisible) {
+      setConfirmedCanonicalId(null);
+    }
+  }, [visibleMatches, confirmedCanonicalId]);
+
   return {
     probe,
     matches: visibleMatches,
