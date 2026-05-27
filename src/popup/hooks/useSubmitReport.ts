@@ -9,6 +9,13 @@ interface SubmitReportArgs {
   priority: 'low' | 'medium' | 'high' | 'critical';
   screenshot: string | null;
   replayEnabled: boolean;
+  /**
+   * Set when the user clicked "Same" on a deflection chip. Forwarded
+   * to the backend so it can set `duplicate_of` + tag the row as
+   * `metadata.deflection_source = 'extension_user_confirmed'`. Null
+   * when the user didn't confirm a deflection.
+   */
+  deflectedToCanonicalId: string | null;
 }
 
 /**
@@ -16,7 +23,7 @@ interface SubmitReportArgs {
  * builds the payload, and sends it to the service worker.
  */
 export function useSubmitReport(args: SubmitReportArgs) {
-  const { title, description, priority, screenshot, replayEnabled } = args;
+  const { title, description, priority, screenshot, replayEnabled, deflectedToCanonicalId } = args;
   const [status, setStatus] = useState<SubmitStatus>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -90,6 +97,10 @@ export function useSubmitReport(args: SubmitReportArgs) {
         hasReplay: replayEvents.length > 0,
         screenshotDataUrl: screenshot ?? '',
         replayEvents,
+        // Omit the field entirely when null so the backend handler
+        // sees `undefined` (consistent with how the SDK widget threads
+        // this through). The backend treats both as "no deflection".
+        ...(deflectedToCanonicalId ? { deflected_to_canonical_id: deflectedToCanonicalId } : {}),
       };
 
       console.warn('[BugSpotter] Submitting report payload:', {
@@ -124,7 +135,7 @@ export function useSubmitReport(args: SubmitReportArgs) {
       setStatus('error');
       setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
     }
-  }, [title, description, priority, screenshot, replayEnabled]);
+  }, [title, description, priority, screenshot, replayEnabled, deflectedToCanonicalId]);
 
   const resetStatus = useCallback(() => setStatus('idle'), []);
 

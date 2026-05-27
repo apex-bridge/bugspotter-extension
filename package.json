@@ -28,7 +28,7 @@
     ]
   },
   "dependencies": {
-    "@bugspotter/common": "^1.0.2",
+    "@bugspotter/common": "^1.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "rrweb": "^2.0.0-alpha.18"
