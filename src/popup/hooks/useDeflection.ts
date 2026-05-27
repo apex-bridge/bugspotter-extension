@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { DeflectionApi, type DeflectionMatch } from '@bugspotter/common';
 import { getSettings } from '@/storage/settings';
 
+// Aligned with the backend's SDK probe floor (sdk-similar.ts) and
+// DeflectionApi's own internal check — below this length the embedding
+// model produces only noise. Guard locally so we don't even pay for a
+// chrome.storage read on the first 1–4 keystrokes.
+const MIN_TITLE_LENGTH = 5;
+
 /**
  * Wraps the shared `@bugspotter/common` DeflectionApi for the popup.
  *
@@ -30,7 +36,18 @@ export function useDeflection() {
   const [rejectedCanonicalIds, setRejectedCanonicalIds] = useState<Set<string>>(() => new Set());
 
   const apiRef = useRef<DeflectionApi | null>(null);
+  // Caches the in-flight init promise so concurrent probe() calls
+  // before the first getSettings() resolves all share one storage
+  // read + one DeflectionApi instance. Without this, rapid
+  // keystrokes can construct multiple APIs that orphan each other,
+  // leaking HTTP requests.
+  const apiPromiseRef = useRef<Promise<DeflectionApi | null> | null>(null);
   const queryCountRef = useRef(0);
+  // Tracks whether the popup is still mounted. When the user closes
+  // the popup mid-probe, an in-flight ensureApi could resolve AFTER
+  // cleanup ran (when apiRef was still null), then fire an
+  // uncancellable query. This ref lets the resolution check.
+  const isMountedRef = useRef(true);
 
   // Lazy setup — only construct the API when actually probed. Avoids
   // a chrome.storage round-trip on every popup mount.
@@ -38,35 +55,56 @@ export function useDeflection() {
     if (apiRef.current) {
       return apiRef.current;
     }
-    const settings = await getSettings();
-    const baseUrl = settings.baseUrl?.trim();
-    const apiKey = settings.apiKey?.trim();
-    if (!baseUrl || !apiKey) {
-      return null;
+    if (apiPromiseRef.current) {
+      return apiPromiseRef.current;
     }
-    apiRef.current = new DeflectionApi({
-      endpoint: `${baseUrl.replace(/\/$/, '')}/api/v1/sdk/similar`,
-      getAuthHeaders: () => ({ 'X-API-Key': apiKey }),
-    });
-    return apiRef.current;
+    apiPromiseRef.current = (async () => {
+      const settings = await getSettings();
+      const baseUrl = settings.baseUrl?.trim();
+      const apiKey = settings.apiKey?.trim();
+      if (!baseUrl || !apiKey) {
+        // Clear the cached promise so a later configure → retry
+        // can succeed without needing a popup reopen.
+        apiPromiseRef.current = null;
+        return null;
+      }
+      const api = new DeflectionApi({
+        endpoint: `${baseUrl.replace(/\/$/, '')}/api/v1/sdk/similar`,
+        getAuthHeaders: () => ({ 'X-API-Key': apiKey }),
+      });
+      apiRef.current = api;
+      return api;
+    })();
+    return apiPromiseRef.current;
   }
 
   async function probe(title: string): Promise<void> {
+    const trimmed = title.trim();
+    // Below the floor → no useful matches possible. Bail before
+    // touching chrome.storage / instantiating DeflectionApi.
+    if (trimmed.length < MIN_TITLE_LENGTH) {
+      setMatches([]);
+      return;
+    }
     const api = await ensureApi();
-    if (!api) {
+    // Bail if the popup unmounted while we were awaiting settings —
+    // firing api.query() now would leak an HTTP request.
+    if (!api || !isMountedRef.current) {
+      api?.cancel();
       return;
     }
     const queryId = ++queryCountRef.current;
     try {
-      const result = await api.query(title.trim());
-      // Discard stale resolves — only the latest query's result wins.
-      if (queryId !== queryCountRef.current) {
+      const result = await api.query(trimmed);
+      // Discard stale resolves — only the latest query's result
+      // wins, and only when the popup is still around to show it.
+      if (queryId !== queryCountRef.current || !isMountedRef.current) {
         return;
       }
       setMatches(result);
     } catch {
       // Soft-fail; DeflectionApi.query is contracted to always resolve.
-      if (queryId === queryCountRef.current) {
+      if (queryId === queryCountRef.current && isMountedRef.current) {
         setMatches([]);
       }
     }
@@ -97,6 +135,7 @@ export function useDeflection() {
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       apiRef.current?.cancel();
     };
   }, []);
