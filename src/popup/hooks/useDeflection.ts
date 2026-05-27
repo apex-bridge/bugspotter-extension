@@ -59,21 +59,30 @@ export function useDeflection() {
       return apiPromiseRef.current;
     }
     apiPromiseRef.current = (async () => {
-      const settings = await getSettings();
-      const baseUrl = settings.baseUrl?.trim();
-      const apiKey = settings.apiKey?.trim();
-      if (!baseUrl || !apiKey) {
-        // Clear the cached promise so a later configure → retry
-        // can succeed without needing a popup reopen.
+      try {
+        const settings = await getSettings();
+        const baseUrl = settings.baseUrl?.trim();
+        const apiKey = settings.apiKey?.trim();
+        if (!baseUrl || !apiKey) {
+          // Clear the cached promise so a later configure → retry
+          // can succeed without needing a popup reopen.
+          apiPromiseRef.current = null;
+          return null;
+        }
+        const api = new DeflectionApi({
+          endpoint: `${baseUrl.replace(/\/$/, '')}/api/v1/sdk/similar`,
+          getAuthHeaders: () => ({ 'X-API-Key': apiKey }),
+        });
+        apiRef.current = api;
+        return api;
+      } catch {
+        // chrome.storage can fail if the extension context is
+        // invalidated mid-update. Soft-fail to keep the "probe never
+        // surfaces errors" contract — clear the cached promise so a
+        // subsequent probe can retry the init.
         apiPromiseRef.current = null;
         return null;
       }
-      const api = new DeflectionApi({
-        endpoint: `${baseUrl.replace(/\/$/, '')}/api/v1/sdk/similar`,
-        getAuthHeaders: () => ({ 'X-API-Key': apiKey }),
-      });
-      apiRef.current = api;
-      return api;
     })();
     return apiPromiseRef.current;
   }
@@ -81,8 +90,13 @@ export function useDeflection() {
   async function probe(title: string): Promise<void> {
     const trimmed = title.trim();
     // Below the floor → no useful matches possible. Bail before
-    // touching chrome.storage / instantiating DeflectionApi.
+    // touching chrome.storage / instantiating DeflectionApi. Also
+    // bump the counter + cancel any in-flight probe so a query
+    // fired at length 5+ that's still in-flight when the user
+    // backspaces to 4 doesn't repopulate matches when it resolves.
     if (trimmed.length < MIN_TITLE_LENGTH) {
+      queryCountRef.current++;
+      apiRef.current?.cancel();
       setMatches([]);
       return;
     }
