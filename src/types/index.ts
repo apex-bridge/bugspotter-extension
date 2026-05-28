@@ -45,6 +45,13 @@ export interface BugReportPayload {
   };
   hasScreenshot: boolean;
   hasReplay: boolean;
+  /**
+   * Set by the deflection panel when the user confirmed "yes, this is
+   * the same as #X" before submitting. Backend uses it to set
+   * `duplicate_of` + `metadata.deflection_source = 'extension_user_confirmed'`.
+   * `null` / undefined when the user didn't deflect.
+   */
+  deflected_to_canonical_id?: string | null;
 }
 
 export interface CreateReportResponse {
