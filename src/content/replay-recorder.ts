@@ -62,17 +62,17 @@ function beginRecording(): void {
       //  - 'all'      → mask every input value (privacy-safe default; rrweb
       //                 default behavior). Password-type inputs are masked
       //                 either way, so maskInputOptions is redundant here.
-      //  - 'pii-only' → only password-type inputs are auto-masked; other
-      //                 values pass through the PII sanitizer so search and
-      //                 filter fields stay readable while emails / phones /
-      //                 etc. still get redacted by pattern.
+      //  - 'pii-only' → password-type inputs are masked; other values pass
+      //                 through the PII sanitizer so search and filter fields
+      //                 stay readable while emails / phones / etc. still get
+      //                 redacted by pattern.
       //
-      // If 'pii-only' was requested but the sanitizer init failed, fall back
-      // to masking everything — better to lose search-field visibility than
-      // to leak PII via inputs because the sanitizer couldn't load.
-      maskAllInputs:
-        activeInputMasking === 'all' || (activeInputMasking === 'pii-only' && !activeSanitizer),
-      maskInputOptions: activeInputMasking === 'pii-only' ? { password: true } : undefined,
+      // rrweb only calls maskInputFn for input types enabled in
+      // maskInputOptions, so 'pii-only' also needs maskAllInputs: true to
+      // route every type through the sanitizer. If the sanitizer init
+      // failed, the fn is absent and maskAllInputs falls back to masking
+      // everything — better to lose search-field visibility than to leak PII.
+      maskAllInputs: true,
       maskInputFn:
         activeInputMasking === 'pii-only' && activeSanitizer
           ? (text: string, element: HTMLElement | null) => {
@@ -86,12 +86,15 @@ function beginRecording(): void {
               return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
             }
           : undefined,
-      // PII sanitization for text content in DOM snapshots
-      maskTextFn: activeSanitizer
-        ? (text: string, element: HTMLElement | null) => {
-            return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
-          }
-        : undefined,
+      // PII sanitization for page text. rrweb only calls maskTextFn on nodes
+      // matched by maskTextClass / maskTextSelector, so '*' is what routes
+      // every text node through the sanitizer.
+      ...(activeSanitizer && {
+        maskTextSelector: '*',
+        maskTextFn: (text: string, element: HTMLElement | null) => {
+          return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
+        },
+      }),
       // Sampling for performance optimization
       sampling: {
         mousemove: 50,
