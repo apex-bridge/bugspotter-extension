@@ -156,6 +156,21 @@ describe('replay recorder sanitization', () => {
 
       expect(serialized()).not.toContain(PASSWORD);
     });
+
+    // A show-password toggle flips type to 'text'; rrweb then tags the
+    // element with data-rr-is-password so it stays masked.
+    it('keeps masking a password field after a show-password toggle', async () => {
+      document.body.innerHTML = '<input id="pw" type="password">';
+      await start('pii-only');
+      type('pw', PASSWORD);
+      await flush();
+      (document.getElementById('pw') as HTMLInputElement).type = 'text';
+      await flush();
+      type('pw', `${PASSWORD}2`);
+      await flush();
+
+      expect(serialized()).not.toContain(PASSWORD);
+    });
   });
 
   // rrweb's maskAllInputs expands to a fixed list of input types that omits

@@ -115,9 +115,14 @@ function beginRecording(): void {
           ? (text: string, element: HTMLElement | null) => {
               // Defense-in-depth: when maskInputFn is set it can override
               // rrweb's maskInputOptions.password handling, so re-check the
-              // element type ourselves. The PII sanitizer alone is not enough
-              // — passwords often don't match any PII pattern.
-              if (element instanceof HTMLInputElement && element.type === 'password') {
+              // element type ourselves. The PII sanitizer alone is not enough:
+              // passwords often don't match any PII pattern. rrweb tags a
+              // field with data-rr-is-password once its type flips away from
+              // 'password' (a show-password toggle), so honor that too.
+              if (
+                element instanceof HTMLInputElement &&
+                (element.type === 'password' || element.hasAttribute('data-rr-is-password'))
+              ) {
                 return '*'.repeat(text.length);
               }
               return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
