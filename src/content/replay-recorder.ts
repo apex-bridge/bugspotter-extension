@@ -13,7 +13,8 @@
  * own page's recording window; cross-page persistence is the SW's job.
  */
 
-import { record } from 'rrweb';
+import { record, EventType, IncrementalSource } from 'rrweb';
+import type { eventWithTime, recordOptions } from 'rrweb';
 import type { ReplayEvent, Sanitizer } from '@bugspotter/common';
 import type { ReplayInputMasking } from '@/types';
 
@@ -49,49 +50,93 @@ function flushBatchToSink(): void {
   }
 }
 
+/**
+ * rrweb's needMaskingText() returns false for a text node with no parent
+ * element, so on the mutation path text sitting directly under a ShadowRoot
+ * (appended later, or a later `Text.data` change) never reaches maskTextFn.
+ * The full snapshot is unaffected: it inherits needsMask from <html>.
+ *
+ * Shadow-root adds carry `isShadow`, so only those are touched. Text-change
+ * entries carry just an id, so every value is re-run; that is a no-op for
+ * values maskTextFn already handled, since `[REDACTED-X]` matches no pattern.
+ */
+function sanitizeShadowRootText(event: eventWithTime, sanitizer: Sanitizer): void {
+  if (
+    event.type !== EventType.IncrementalSnapshot ||
+    event.data.source !== IncrementalSource.Mutation
+  ) {
+    return;
+  }
+  for (const text of event.data.texts) {
+    if (text.value) text.value = sanitizer.sanitizeTextNode(text.value);
+  }
+  for (const { node } of event.data.adds) {
+    if (node.isShadow && 'textContent' in node && node.textContent) {
+      node.textContent = sanitizer.sanitizeTextNode(node.textContent);
+    }
+  }
+}
+
 function beginRecording(): void {
   pendingAbort = null;
 
   stopFn =
     record({
       emit(event) {
+        if (activeSanitizer) sanitizeShadowRootText(event, activeSanitizer);
         pendingBatch.push(event as ReplayEvent);
       },
       blockClass: 'bugspotter-ignore',
       // Input masking strategy is user-configurable via Settings:
-      //  - 'all'      → mask every input value (privacy-safe default; rrweb
-      //                 default behavior). Password-type inputs are masked
-      //                 either way, so maskInputOptions is redundant here.
-      //  - 'pii-only' → only password-type inputs are auto-masked; other
-      //                 values pass through the PII sanitizer so search and
-      //                 filter fields stay readable while emails / phones /
-      //                 etc. still get redacted by pattern.
+      //  - 'all'      → mask every input value (privacy-safe default).
+      //  - 'pii-only' → password-type inputs are masked; other values pass
+      //                 through the PII sanitizer so search and filter fields
+      //                 stay readable while emails / phones / etc. still get
+      //                 redacted by pattern.
       //
-      // If 'pii-only' was requested but the sanitizer init failed, fall back
-      // to masking everything — better to lose search-field visibility than
-      // to leak PII via inputs because the sanitizer couldn't load.
-      maskAllInputs:
-        activeInputMasking === 'all' || (activeInputMasking === 'pii-only' && !activeSanitizer),
-      maskInputOptions: activeInputMasking === 'pii-only' ? { password: true } : undefined,
+      // rrweb only masks (or calls maskInputFn for) elements whose tag name
+      // or input type is enabled in maskInputOptions. maskAllInputs: true
+      // expands to a fixed type list that omits `hidden`, and it overrides
+      // maskInputOptions when both are set, so key by tag name instead: that
+      // covers every <input>, <textarea> and <select>. rrweb still records
+      // radio / checkbox (and, at snapshot, submit / button) values as-is;
+      // those are author-defined, not user data. If the sanitizer init
+      // failed, the fn is absent and every value is masked: better to lose
+      // search-field visibility than to leak PII. The cast is needed because
+      // rrweb's MaskInputOptions type lists only input types, though
+      // maskInputValue() also checks the tag name.
+      maskInputOptions: {
+        input: true,
+        textarea: true,
+        select: true,
+      } as recordOptions<eventWithTime>['maskInputOptions'],
       maskInputFn:
         activeInputMasking === 'pii-only' && activeSanitizer
           ? (text: string, element: HTMLElement | null) => {
               // Defense-in-depth: when maskInputFn is set it can override
               // rrweb's maskInputOptions.password handling, so re-check the
-              // element type ourselves. The PII sanitizer alone is not enough
-              // — passwords often don't match any PII pattern.
-              if (element instanceof HTMLInputElement && element.type === 'password') {
+              // element type ourselves. The PII sanitizer alone is not enough:
+              // passwords often don't match any PII pattern. rrweb tags a
+              // field with data-rr-is-password once its type flips away from
+              // 'password' (a show-password toggle), so honor that too.
+              if (
+                element instanceof HTMLInputElement &&
+                (element.type === 'password' || element.hasAttribute('data-rr-is-password'))
+              ) {
                 return '*'.repeat(text.length);
               }
               return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
             }
           : undefined,
-      // PII sanitization for text content in DOM snapshots
-      maskTextFn: activeSanitizer
-        ? (text: string, element: HTMLElement | null) => {
-            return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
-          }
-        : undefined,
+      // PII sanitization for page text. rrweb only calls maskTextFn on nodes
+      // matched by maskTextClass / maskTextSelector, so '*' is what routes
+      // every text node through the sanitizer.
+      ...(activeSanitizer && {
+        maskTextSelector: '*',
+        maskTextFn: (text: string, element: HTMLElement | null) => {
+          return activeSanitizer!.sanitizeTextNode(text, element ?? undefined);
+        },
+      }),
       // Sampling for performance optimization
       sampling: {
         mousemove: 50,
