@@ -76,6 +76,56 @@ describe('replay recorder sanitization', () => {
     expect(serialized()).not.toContain(EMAIL);
   });
 
+  // rrweb's needMaskingText() returns false for a text node with no parent
+  // element, so text sitting directly under a ShadowRoot skips maskTextFn on
+  // the mutation path. Each test also asserts the non-PII part is present, so
+  // a pass proves rrweb recorded the shadow text rather than dropping it.
+  describe('text directly under a shadow root', () => {
+    const host = () => {
+      const el = document.createElement('div');
+      document.body.appendChild(el);
+      return el.attachShadow({ mode: 'open' });
+    };
+
+    it('redacts PII present at snapshot time', async () => {
+      host().append(`${CONTROL} ${EMAIL}`);
+      await start('pii-only');
+
+      expect(serialized()).toContain(CONTROL);
+      expect(serialized()).not.toContain(EMAIL);
+    });
+
+    it('redacts PII appended after recording starts', async () => {
+      const root = host();
+      await start('pii-only');
+      root.append(`${CONTROL} ${EMAIL}`);
+      await flush();
+
+      expect(serialized()).toContain(CONTROL);
+      expect(serialized()).not.toContain(EMAIL);
+    });
+
+    it('redacts PII in a host added after recording starts', async () => {
+      await start('pii-only');
+      host().append(`${CONTROL} ${EMAIL}`);
+      await flush();
+
+      expect(serialized()).toContain(CONTROL);
+      expect(serialized()).not.toContain(EMAIL);
+    });
+
+    it('redacts PII when the text data changes', async () => {
+      const text = document.createTextNode('placeholder');
+      host().append(text);
+      await start('pii-only');
+      text.data = `Shipped to ${EMAIL}`;
+      await flush();
+
+      expect(serialized()).toContain('Shipped to');
+      expect(serialized()).not.toContain(EMAIL);
+    });
+  });
+
   describe("inputMasking 'pii-only'", () => {
     it('redacts PII in input values and keeps non-PII values readable', async () => {
       document.body.innerHTML = '<input id="email" type="text"><input id="q" type="search">';

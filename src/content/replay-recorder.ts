@@ -13,7 +13,8 @@
  * own page's recording window; cross-page persistence is the SW's job.
  */
 
-import { record } from 'rrweb';
+import { record, EventType, IncrementalSource } from 'rrweb';
+import type { eventWithTime } from 'rrweb';
 import type { ReplayEvent, Sanitizer } from '@bugspotter/common';
 import type { ReplayInputMasking } from '@/types';
 
@@ -49,12 +50,40 @@ function flushBatchToSink(): void {
   }
 }
 
+/**
+ * rrweb's needMaskingText() returns false for a text node with no parent
+ * element, so on the mutation path text sitting directly under a ShadowRoot
+ * (appended later, or a later `Text.data` change) never reaches maskTextFn.
+ * The full snapshot is unaffected: it inherits needsMask from <html>.
+ *
+ * Shadow-root adds carry `isShadow`, so only those are touched. Text-change
+ * entries carry just an id, so every value is re-run; that is a no-op for
+ * values maskTextFn already handled, since `[REDACTED-X]` matches no pattern.
+ */
+function sanitizeShadowRootText(event: eventWithTime, sanitizer: Sanitizer): void {
+  if (
+    event.type !== EventType.IncrementalSnapshot ||
+    event.data.source !== IncrementalSource.Mutation
+  ) {
+    return;
+  }
+  for (const text of event.data.texts) {
+    if (text.value) text.value = sanitizer.sanitizeTextNode(text.value);
+  }
+  for (const { node } of event.data.adds) {
+    if (node.isShadow && 'textContent' in node && node.textContent) {
+      node.textContent = sanitizer.sanitizeTextNode(node.textContent);
+    }
+  }
+}
+
 function beginRecording(): void {
   pendingAbort = null;
 
   stopFn =
     record({
       emit(event) {
+        if (activeSanitizer) sanitizeShadowRootText(event, activeSanitizer);
         pendingBatch.push(event as ReplayEvent);
       },
       blockClass: 'bugspotter-ignore',
