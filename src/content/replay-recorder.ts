@@ -14,7 +14,7 @@
  */
 
 import { record, EventType, IncrementalSource } from 'rrweb';
-import type { eventWithTime } from 'rrweb';
+import type { eventWithTime, recordOptions } from 'rrweb';
 import type { ReplayEvent, Sanitizer } from '@bugspotter/common';
 import type { ReplayInputMasking } from '@/types';
 
@@ -88,20 +88,28 @@ function beginRecording(): void {
       },
       blockClass: 'bugspotter-ignore',
       // Input masking strategy is user-configurable via Settings:
-      //  - 'all'      → mask every input value (privacy-safe default; rrweb
-      //                 default behavior). Password-type inputs are masked
-      //                 either way, so maskInputOptions is redundant here.
+      //  - 'all'      → mask every input value (privacy-safe default).
       //  - 'pii-only' → password-type inputs are masked; other values pass
       //                 through the PII sanitizer so search and filter fields
       //                 stay readable while emails / phones / etc. still get
       //                 redacted by pattern.
       //
-      // rrweb only calls maskInputFn for input types enabled in
-      // maskInputOptions, so 'pii-only' also needs maskAllInputs: true to
-      // route every type through the sanitizer. If the sanitizer init
-      // failed, the fn is absent and maskAllInputs falls back to masking
-      // everything — better to lose search-field visibility than to leak PII.
-      maskAllInputs: true,
+      // rrweb only masks (or calls maskInputFn for) elements whose tag name
+      // or input type is enabled in maskInputOptions. maskAllInputs: true
+      // expands to a fixed type list that omits `hidden`, and it overrides
+      // maskInputOptions when both are set, so key by tag name instead: that
+      // covers every <input>, <textarea> and <select>. rrweb still records
+      // radio / checkbox (and, at snapshot, submit / button) values as-is;
+      // those are author-defined, not user data. If the sanitizer init
+      // failed, the fn is absent and every value is masked: better to lose
+      // search-field visibility than to leak PII. The cast is needed because
+      // rrweb's MaskInputOptions type lists only input types, though
+      // maskInputValue() also checks the tag name.
+      maskInputOptions: {
+        input: true,
+        textarea: true,
+        select: true,
+      } as recordOptions<eventWithTime>['maskInputOptions'],
       maskInputFn:
         activeInputMasking === 'pii-only' && activeSanitizer
           ? (text: string, element: HTMLElement | null) => {

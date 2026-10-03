@@ -24,10 +24,10 @@ describe('replay recorder sanitization', () => {
   let events: ReplayEvent[];
 
   // Recorder state is module-level, so load a fresh copy per test.
-  const start = async (inputMasking: ReplayInputMasking) => {
+  const start = async (inputMasking: ReplayInputMasking, withSanitizer = true) => {
     recorder = await import('@/content/replay-recorder');
     recorder.startReplayRecording({
-      sanitizer: createSanitizer({ enabled: true }),
+      sanitizer: withSanitizer ? createSanitizer({ enabled: true }) : undefined,
       inputMasking,
       onBatch: (batch) => events.push(...batch),
     });
@@ -156,6 +156,59 @@ describe('replay recorder sanitization', () => {
 
       expect(serialized()).not.toContain(PASSWORD);
     });
+  });
+
+  // rrweb's maskAllInputs expands to a fixed list of input types that omits
+  // `hidden`, so those values skipped masking entirely. Masking by tag name
+  // covers every <input>, typed or not.
+  describe.each([
+    ['pii-only', (out: string) => expect(out).not.toContain(EMAIL)],
+    ['all', (out: string) => expect(out).toContain('*'.repeat(EMAIL.length))],
+  ] as const)("uncommon input types, inputMasking '%s'", (mode, expectMasked) => {
+    it('masks a hidden input value present at snapshot time', async () => {
+      document.body.innerHTML = `<input type="hidden" value="${EMAIL}">`;
+      await start(mode);
+      const out = serialized();
+
+      expect(out).not.toContain(EMAIL);
+      expectMasked(out);
+    });
+
+    it('masks a hidden input value set after recording starts', async () => {
+      document.body.innerHTML = '<input id="h" type="hidden">';
+      await start(mode);
+      (document.getElementById('h') as HTMLInputElement).value = EMAIL;
+      await flush();
+      const out = serialized();
+
+      expect(out).not.toContain(EMAIL);
+      expectMasked(out);
+    });
+
+    it('masks an input with no type attribute', async () => {
+      document.body.innerHTML = `<input id="u" value="${EMAIL}">`;
+      await start(mode);
+      type('u', `${CONTROL} ${EMAIL}`);
+      await flush();
+
+      expect(serialized()).not.toContain(EMAIL);
+    });
+  });
+
+  it("keeps non-PII hidden input values readable in 'pii-only'", async () => {
+    document.body.innerHTML = `<input type="hidden" value="${CONTROL}">`;
+    await start('pii-only');
+
+    expect(serialized()).toContain(CONTROL);
+  });
+
+  it("masks every input in 'pii-only' when the sanitizer is unavailable", async () => {
+    document.body.innerHTML = `<input type="hidden" value="${CONTROL}"><input id="q" type="search">`;
+    await start('pii-only', false);
+    type('q', CONTROL);
+    await flush();
+
+    expect(serialized()).not.toContain(CONTROL);
   });
 
   describe("inputMasking 'all'", () => {
