@@ -126,6 +126,18 @@ describe('replay recorder sanitization', () => {
     });
   });
 
+  // Every text node goes through the PII patterns on the main thread.
+  // @bugspotter/common < 1.1.2 had a quadratic email regex: one 50 KB
+  // paragraph of "a.a.a." froze the snapshot for seconds.
+  it('snapshots adversarial page text in linear time', async () => {
+    document.body.innerHTML = `<p>${'a.'.repeat(25_000)}</p>`;
+    const begin = performance.now();
+    await start('pii-only');
+    const ms = performance.now() - begin;
+
+    expect(ms).toBeLessThan(1000);
+  });
+
   describe("inputMasking 'pii-only'", () => {
     it('redacts PII in input values and keeps non-PII values readable', async () => {
       document.body.innerHTML = '<input id="email" type="text"><input id="q" type="search">';

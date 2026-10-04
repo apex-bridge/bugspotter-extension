@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@bugspotter/common':
-        specifier: ^1.1.1
-        version: 1.1.1
+        specifier: ^1.1.2
+        version: 1.1.2
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -190,8 +190,8 @@ packages:
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
 
-  '@bugspotter/common@1.1.1':
-    resolution: {integrity: sha512-aRQ7gm/k0voHZthPDMzCxkEf4aQbN5kEmoqqdbTcS/sDhWBh+5iEMB7w0yeaPkpm8I3tdXHUTdAAx2jZjqkRzA==}
+  '@bugspotter/common@1.1.2':
+    resolution: {integrity: sha512-OkCw6WAVmBBmZjxth+cmblLLOGqoyLCAX1VT+tkEvgkij/b67PF4wB0uOvQ2gkV7QnnRp0aqxbVqfdw+UO2sew==}
 
   '@crxjs/vite-plugin@2.3.0':
     resolution: {integrity: sha512-+0CNVGS4bB30OoaF1vUsHVwWU1Lm7MxI0XWY9Fd/Ob+ZVTZgEFNqJ1ZC69IVwQsoYhY0sMQLvpLWiFIuDz8htg==}
@@ -2314,7 +2314,7 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
-  '@bugspotter/common@1.1.1': {}
+  '@bugspotter/common@1.1.2': {}
 
   '@crxjs/vite-plugin@2.3.0':
     dependencies:
